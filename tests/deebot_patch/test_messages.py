@@ -7,7 +7,6 @@ from unittest.mock import Mock
 
 import pytest
 from deebot_client.events import StateEvent
-from deebot_client.message import HandlingState
 from deebot_client.models import State
 
 from custom_components.ecovacs_mower.deebot_patch.messages import (
@@ -59,6 +58,19 @@ def test_on_charge_info(state: str, expected: State) -> None:
 def test_on_charge_info_ignores_other_states(state: str) -> None:
     data = {"cid": "122", "trigger": "app", "state": state}
     assert _notified_states(OnChargeInfo, data) == []
+
+
+def test_on_charge_info_alert_overrides_docked_state() -> None:
+    # "idle" betyder normalt DOCKED, men trigger="alert" är ett feltillstånd
+    # och måste vinna även om state annars skulle tolkas som en lyckad dockning.
+    data = {"cid": "122", "trigger": "alert", "state": "idle"}
+    assert _notified_states(OnChargeInfo, data) == [State.ERROR]
+
+
+def test_on_charge_info_alert_overrides_ignored_state() -> None:
+    # Samma kontroll måste även slå igenom för ett state som annars ignoreras.
+    data = {"cid": "122", "trigger": "alert", "state": "unknownState"}
+    assert _notified_states(OnChargeInfo, data) == [State.ERROR]
 
 
 @pytest.mark.parametrize(

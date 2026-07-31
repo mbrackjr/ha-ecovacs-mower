@@ -16,14 +16,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from deebot_client.events import StateEvent
-from deebot_client.logging_filter import get_logger
 from deebot_client.message import HandlingResult, MessageBodyDataDict
 from deebot_client.models import State
 
 if TYPE_CHECKING:
     from deebot_client.event_bus import EventBus
-
-_LOGGER = get_logger(__name__)
 
 
 def handle_clean_info(event_bus: EventBus, data: dict[str, Any]) -> HandlingResult:
@@ -78,6 +75,15 @@ class OnChargeInfo(MessageBodyDataDict):
         Till skillnad från clean-info ligger tillståndet här på toppnivå:
         "goCharging" på väg hem, "idle" när arbetet är klart.
         """
+        # Kontrollen ligger före state-matchningen så den vinner oavsett
+        # vilket state som råkar följa med. Inte observerad i enhetsloggarna
+        # (bara "app" och "workComplete" har setts för onChargeInfo), men
+        # "trigger": "alert" är entydigt ett feltillstånd och får inte falla
+        # igenom tyst bara därför att kombinationen är ovanlig.
+        if data.get("trigger") == "alert":
+            event_bus.notify(StateEvent(State.ERROR))
+            return HandlingResult.success()
+
         match data.get("state"):
             case "goCharging":
                 status = State.RETURNING
