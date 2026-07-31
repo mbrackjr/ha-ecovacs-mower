@@ -13,6 +13,13 @@ import sys
 
 import pytest
 
+# Vakten hindrar bara den explicita laddningen. Pluginet registrerar sig även
+# som pytest11-entry point och autoladdas av pytest oberoende av den här filen.
+# Lokalt på Windows krävs därför också flaggan:
+#
+#     python -m pytest tests/deebot_patch/ -p no:homeassistant -v
+#
+# Flaggan hör inte hemma i pytest.ini — CI behöver pluginet laddat.
 _HA_AVAILABLE = sys.platform != "win32"
 
 if _HA_AVAILABLE:
