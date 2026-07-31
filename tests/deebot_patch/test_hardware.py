@@ -40,6 +40,19 @@ async def test_unpatched_library_refreshes_state_with_clean_info_v2() -> None:
     assert any(type(c) is GetCleanInfoV2 for c in commands)
     assert not any(type(c) is GetCleanInfo for c in commands)
 
+    # Längden är ingen godtycklig siffra — ta inte bort den.
+    #
+    # patch_device_info() bygger ett helt nytt CapabilityEvent med exakt två
+    # kommandon i stället för att byta ut det enda trasiga. Det är korrekt så
+    # länge uppströms lista också är just [GetChargeState, GetCleanInfoV2],
+    # men lägger uppströms till ett tredje state-kommando skulle vår patch
+    # tappa det spårlöst — och övriga assertions här skulle inte märka något,
+    # eftersom de bara kontrollerar närvaro och frånvaro av två typer.
+    #
+    # Blir raden röd: avgör om det nya kommandot ska följa med i patchen
+    # (troligen ja) och uppdatera hardware.py, inte bara siffran.
+    assert [type(c).__name__ for c in commands] == ["GetChargeState", "GetCleanInfoV2"]
+
 
 async def test_patch_swaps_in_clean_mower() -> None:
     await patch_device_info(O1200)
@@ -110,10 +123,21 @@ async def test_apply_registers_both_handlers() -> None:
 
 
 async def test_apply_is_idempotent() -> None:
+    from deebot_client.messages.json import MESSAGES
+
     from custom_components.ecovacs_mower.deebot_patch import apply
+    from custom_components.ecovacs_mower.deebot_patch.messages import (
+        OnChargeInfo,
+        OnScheduleTaskInfo,
+    )
 
     apply()
     apply()
+
+    # Utan de här hävdandena består testet enbart på att apply():s egen
+    # efterkontroll skulle ha kastat — det står då inte på egna ben.
+    assert MESSAGES["onChargeInfo"] is OnChargeInfo
+    assert MESSAGES["onScheduleTaskInfo"] is OnScheduleTaskInfo
 
 
 async def test_get_message_finds_the_registered_handlers() -> None:

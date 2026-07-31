@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from importlib.metadata import version
 import logging
+from typing import NoReturn
 
 from deebot_client.capabilities import Capabilities
+from deebot_client.commands.json.clean import GetCleanInfo
+from deebot_client.events import StateEvent
 from deebot_client.hardware import _DEVICES
 from deebot_client.messages.json import MESSAGES
 
@@ -34,7 +37,7 @@ class PatchContractError(Exception):
     """deebot-client ser inte ut som patchlagret förväntar sig."""
 
 
-def _fail(what: str) -> None:
+def _fail(what: str) -> NoReturn:
     installed = version("deebot-client")
     raise PatchContractError(
         f"deebot-client {installed} matchar inte vad ecovacs_mower förväntar sig: "
@@ -72,9 +75,6 @@ def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
     ``get_devices()`` — en cacheuppslagning skulle se rätt ut även om
     enheten byggts av en opatchad definition.
     """
-    from deebot_client.commands.json.clean import GetCleanInfo
-    from deebot_client.events import StateEvent
-
     if capabilities.clean.action.command is not CleanMower:
         _fail(
             f"enheten {class_} byggdes med {capabilities.clean.action.command.__name__} "
