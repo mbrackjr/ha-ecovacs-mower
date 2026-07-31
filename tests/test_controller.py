@@ -88,6 +88,11 @@ def test_patch_runs_before_get_devices() -> None:
     det anropet har enheterna redan fått de opatchade kapabiliteterna, och en
     cacheuppslagning ser ändå rätt ut. Verifieringen måste i sin tur ske efter
     ``get_devices()``, på det objekt enheten faktiskt fick.
+
+    Notera vad testet bevisar: **källkodsordning, inte exekveringsordning.**
+    Det skulle passera för ``if False: patch_device_info(...)`` eller för ett
+    anrop som flyttats in i en hjälpfunktion som körs senare. Vad det fångar är
+    den realistiska regressionen — att någon flyttar en rad.
     """
     from custom_components.ecovacs_mower import controller
 
@@ -108,15 +113,43 @@ def test_verification_reads_static_device_info() -> None:
 def _forbidden_imports(path: Path) -> list[str]:
     """Returnera förbjudna uppströmsmoduler som importeras i *path*.
 
-    AST i stället för substrängsökning: ``from deebot_client import hardware``
-    innehåller aldrig strängen ``deebot_client.hardware`` men importerar exakt
-    det register vi vill hålla inne i deebot_patch/. Strängliteraler granskas
-    också, så att ``import_module("deebot_client.hardware")`` inte slinker
-    igenom — det är den väg AST-formen annars hade missat.
+    Fyra former fångas:
+
+    * ``import deebot_client.hardware``
+    * ``from deebot_client.hardware import _DEVICES``
+    * ``from deebot_client import hardware`` — innehåller aldrig strängen
+      ``deebot_client.hardware``, så en substrängsökning hade missat den
+    * ``deebot_client.hardware._DEVICES`` efter ett bart ``import deebot_client``
+      — ren attributåtkomst, den mest närliggande läckan av alla eftersom den
+      inte kräver något ovanligt av den som skriver koden
+
+    Strängliteraler granskas också, så att
+    ``import_module("deebot_client.hardware")`` inte slinker igenom.
+
+    Gränsen går vid statisk analys. Detta fångas **inte**: alias
+    (``import deebot_client as dc``), strängkonkatenering
+    (``"deebot_client." + "hardware"``) och ``getattr``-indirektion. Den som
+    vill runda vakten kan, men ingen gör det av misstag.
+
+    Relativa importer släpps igenom med flit: ``from .deebot_patch.hardware
+    import ...`` är nödutgången, och att tvätta uppströmsobjekt genom den är
+    hela poängen med modulen.
     """
 
     def is_forbidden(name: str) -> bool:
         return any(name == m or name.startswith(f"{m}.") for m in FORBIDDEN_MODULES)
+
+    def dotted_name(node: ast.Attribute) -> str | None:
+        """Rekonstruera ``a.b.c`` ur en attributkedja rotad i ett namn."""
+        parts = []
+        current: ast.expr = node
+        while isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        if not isinstance(current, ast.Name):
+            return None
+        parts.append(current.id)
+        return ".".join(reversed(parts))
 
     found: list[str] = []
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -132,10 +165,16 @@ def _forbidden_imports(path: Path) -> list[str]:
                     for a in node.names
                     if is_forbidden(f"deebot_client.{a.name}")
                 )
+        elif isinstance(node, ast.Attribute):
+            if (name := dotted_name(node)) and is_forbidden(name):
+                found.append(name)
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             if is_forbidden(node.value):
                 found.append(node.value)
-    return found
+
+    # ast.walk besöker varje led i en attributkedja, så samma läcka kan
+    # rapporteras flera gånger. Dedupliceras för läsbar felutskrift.
+    return list(dict.fromkeys(found))
 
 
 def test_only_deebot_patch_touches_upstream_internals() -> None:
@@ -164,22 +203,27 @@ def test_only_deebot_patch_touches_upstream_internals() -> None:
 
 
 def test_constraint_check_catches_a_leak(tmp_path: Path) -> None:
-    """Constraintstestet ska faktiskt fånga en läcka, i båda importformerna."""
+    """Constraintstestet ska faktiskt fånga en läcka, i varje form det påstår."""
     leaks = (
         "from deebot_client.hardware import _DEVICES",
         "from deebot_client import hardware",
         "import deebot_client.messages.json",
         'import_module("deebot_client.hardware")',
+        "import deebot_client\n_DEVICES = deebot_client.hardware._DEVICES\n",
     )
     for index, leak in enumerate(leaks):
         path = tmp_path / f"leak{index}.py"
         path.write_text(leak, encoding="utf-8")
         assert _forbidden_imports(path), f"missade läcka: {leak}"
 
+    # Nödutgången måste fortsätta släppas igenom — att nå uppströmsobjekt via
+    # deebot_patch är hela poängen med modulen.
     clean = tmp_path / "clean.py"
     clean.write_text(
         "from deebot_client.device import Device\n"
-        "from .deebot_patch.hardware import SUPPORTED_CLASSES\n",
+        "from .deebot_patch.hardware import SUPPORTED_CLASSES\n"
+        "from . import deebot_patch\n"
+        "_DEVICES = deebot_patch.hardware.SUPPORTED_CLASSES\n",
         encoding="utf-8",
     )
     assert not _forbidden_imports(clean)

@@ -104,8 +104,20 @@ class EcovacsController:
 
             # Kontrollera det objekt enheten faktiskt fick, inte cachen.
             for info in devices.mqtt:
-                if info.api["class"] in SUPPORTED_CLASSES:
-                    verify_capabilities(info.static.capabilities, info.api["class"])
+                device_class = info.api["class"]
+                if device_class in SUPPORTED_CLASSES:
+                    verify_capabilities(info.static.capabilities, device_class)
+                else:
+                    # Debug, inte warning: en vanlig Deebot-dammsugare på samma
+                    # konto hamnar helt korrekt här, opatchad, och en varning
+                    # vore falsklarm. Spåret finns för det fall som faktiskt är
+                    # värt att se — en annan gräsklipparmodell, som behöver
+                    # läggas till i SUPPORTED_CLASSES.
+                    _LOGGER.debug(
+                        "Enhetsklass %s ligger utanför fas 1 och används "
+                        "opatchad, utan kapabilitetskontroll",
+                        device_class,
+                    )
 
             if devices.mqtt:
                 mqtt = await self._get_mqtt_client()
