@@ -9,6 +9,7 @@ skip-markör hinner gälla. Sanningskällan är CI på ubuntu-latest.
 import ast
 import inspect
 from pathlib import Path
+import textwrap
 
 from . import requires_ha
 
@@ -54,6 +55,31 @@ def test_controller_exposes_devices() -> None:
     )
 
 
+def _call_order(func: object) -> list[str]:
+    """Returnera namnen på anropen i *func*, i källkodsordning.
+
+    AST i stället för strängsökning: kommentarerna i initialize() nämner
+    ``get_devices()`` vid namn, och en indexsökning hade träffat kommentaren
+    i stället för anropet.
+    """
+    source = textwrap.dedent(inspect.getsource(func))  # type: ignore[arg-type]
+    found: list[tuple[int, int, str]] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        name = (
+            target.attr
+            if isinstance(target, ast.Attribute)
+            else target.id
+            if isinstance(target, ast.Name)
+            else None
+        )
+        if name is not None:
+            found.append((node.lineno, node.col_offset, name))
+    return [name for _, _, name in sorted(found)]
+
+
 def test_patch_runs_before_get_devices() -> None:
     """Patchen måste sådda cachen innan enheterna byggs.
 
@@ -65,12 +91,10 @@ def test_patch_runs_before_get_devices() -> None:
     """
     from custom_components.ecovacs_mower import controller
 
-    source = inspect.getsource(controller.EcovacsController.initialize)
-    patch = source.index("patch_device_info(")
-    get_devices = source.index("get_devices()")
-    verify = source.index("verify_capabilities(")
+    calls = _call_order(controller.EcovacsController.initialize)
 
-    assert patch < get_devices < verify
+    assert calls.index("patch_device_info") < calls.index("get_devices")
+    assert calls.index("get_devices") < calls.index("verify_capabilities")
 
 
 def test_verification_reads_static_device_info() -> None:
