@@ -1,6 +1,6 @@
-homeassistant==2026.4.4
+homeassistant==2026.7.4
 deebot-client==18.5.1
-pytest-homeassistant-custom-component==0.13.325
+pytest-homeassistant-custom-component==0.13.348
 pytest
 pytest-asyncio
 pytest-cov
