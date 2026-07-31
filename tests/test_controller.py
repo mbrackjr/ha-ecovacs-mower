@@ -110,7 +110,9 @@ def _forbidden_imports(path: Path) -> list[str]:
 
     AST i stället för substrängsökning: ``from deebot_client import hardware``
     innehåller aldrig strängen ``deebot_client.hardware`` men importerar exakt
-    det register vi vill hålla inne i deebot_patch/.
+    det register vi vill hålla inne i deebot_patch/. Strängliteraler granskas
+    också, så att ``import_module("deebot_client.hardware")`` inte slinker
+    igenom — det är den väg AST-formen annars hade missat.
     """
 
     def is_forbidden(name: str) -> bool:
@@ -130,6 +132,9 @@ def _forbidden_imports(path: Path) -> list[str]:
                     for a in node.names
                     if is_forbidden(f"deebot_client.{a.name}")
                 )
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if is_forbidden(node.value):
+                found.append(node.value)
     return found
 
 
@@ -164,6 +169,7 @@ def test_constraint_check_catches_a_leak(tmp_path: Path) -> None:
         "from deebot_client.hardware import _DEVICES",
         "from deebot_client import hardware",
         "import deebot_client.messages.json",
+        'import_module("deebot_client.hardware")',
     )
     for index, leak in enumerate(leaks):
         path = tmp_path / f"leak{index}.py"
