@@ -1,0 +1,10 @@
+ha-ecovacs-mower
+Copyright (C) 2026 Rickard Nord
+
+This project contains code derived from the Home Assistant "ecovacs"
+integration, Copyright the Home Assistant authors, licensed under the
+Apache License 2.0. See https://github.com/home-assistant/core
+
+This project depends on deebot-client, Copyright the DeebotUniverse
+authors, licensed under GPL-3.0.
+See https://github.com/DeebotUniverse/client.py
