@@ -49,6 +49,13 @@
     }
   },
   "entity": {
+    "button": {
+      "play_sound": { "name": "Locate mower" },
+      "reset_lifespan_blade": { "name": "Reset blades" },
+      "reset_lifespan_lens_brush": { "name": "Reset lens brush" },
+      "reset_lifespan_trimmer_brush": { "name": "Reset trimmer brush" },
+      "reset_lifespan_weed_rope": { "name": "Reset weed rope" }
+    },
     "number": {
       "volume": { "name": "Volume" },
       "cut_direction": { "name": "Cutting direction" }

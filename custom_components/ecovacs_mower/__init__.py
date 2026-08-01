@@ -8,7 +8,13 @@ from homeassistant.core import HomeAssistant
 
 from .controller import EcovacsController
 
-PLATFORMS = [Platform.LAWN_MOWER, Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [
+    Platform.BUTTON,
+    Platform.LAWN_MOWER,
+    Platform.NUMBER,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 
 type EcovacsMowerConfigEntry = ConfigEntry[EcovacsController]
 

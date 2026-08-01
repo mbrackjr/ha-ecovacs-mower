@@ -1,6 +1,15 @@
 {
   "entity": {
     "button": {
+      "play_sound": {
+        "default": "mdi:map-marker-radius"
+      },
+      "reset_lifespan_blade": {
+        "default": "mdi:saw-blade"
+      },
+      "reset_lifespan_lens_brush": {
+        "default": "mdi:broom"
+      },
       "reset_lifespan_trimmer_brush": {
         "default": "mdi:brush"
       },
