@@ -49,6 +49,10 @@
     }
   },
   "entity": {
+    "number": {
+      "volume": { "name": "Volume" },
+      "cut_direction": { "name": "Cutting direction" }
+    },
     "sensor": {
       "stats_area": { "name": "Mowed area" },
       "stats_time": { "name": "Mowing time" },

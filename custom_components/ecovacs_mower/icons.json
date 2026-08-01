@@ -8,6 +8,17 @@
         "default": "mdi:string-lights"
       }
     },
+    "number": {
+      "cut_direction": {
+        "default": "mdi:angle-acute"
+      },
+      "volume": {
+        "default": "mdi:volume-high",
+        "state": {
+          "0": "mdi:volume-off"
+        }
+      }
+    },
     "sensor": {
       "error": {
         "default": "mdi:alert-circle"
