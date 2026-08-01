@@ -147,7 +147,15 @@ class EcovacsMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Ecovacs."""
 
     VERSION = 1
-    MINOR_VERSION = 2
+    # 1, inte 2. Tvåan är ärvd från kärnans fork, där minor 1 är tiden före
+    # enhets-ID:t persisterades. Den här integrationen har aldrig haft någon
+    # annan version än den här — dess första release *är* den här — så ingen
+    # entry med minor 1 kan existera. Att ändå stå på 2 vore en fälla: Home
+    # Assistant accepterar en saknad ``async_migrate_entry`` vid samma major
+    # och fortsätter, så en minor-1-entry skulle nå controllern och krascha på
+    # ``config[CONF_DEVICE_ID]``. Höj den här bara tillsammans med en riktig
+    # ``async_migrate_entry``.
+    MINOR_VERSION = 1
 
     _mode: InstanceMode = InstanceMode.CLOUD
     _input: dict[str, Any]
