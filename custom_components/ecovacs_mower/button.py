@@ -12,6 +12,12 @@ exponeras inte av core-integrationen. Den återanvänder cores befintliga
 ``EcovacsButtonEntity``/``EcovacsButtonEntityDescription`` — ingen ny
 entitetsklass krävs, se ``play_sound: CapabilityExecute[[]]`` i
 ``deebot_client/capabilities.py``.
+
+Annoteringen på ``EcovacsButtonEntity.entity_description`` är rättad mot core,
+som anger ``EcovacsLifespanButtonEntityDescription`` — sannolikt en
+copy-paste-miss, eftersom klassen aldrig använder livslängdsbeskrivningen.
+Harmlöst vid körning, men en felaktig typ i en fork är svårare att upptäcka
+än i uppströms.
 """
 
 from dataclasses import dataclass
