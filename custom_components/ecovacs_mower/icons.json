@@ -1,0 +1,53 @@
+{
+  "entity": {
+    "button": {
+      "reset_lifespan_trimmer_brush": {
+        "default": "mdi:brush"
+      },
+      "reset_lifespan_weed_rope": {
+        "default": "mdi:string-lights"
+      }
+    },
+    "sensor": {
+      "error": {
+        "default": "mdi:alert-circle"
+      },
+      "lifespan_blade": {
+        "default": "mdi:saw-blade"
+      },
+      "lifespan_lens_brush": {
+        "default": "mdi:broom"
+      },
+      "lifespan_trimmer_brush": {
+        "default": "mdi:brush"
+      },
+      "lifespan_weed_rope": {
+        "default": "mdi:string-lights"
+      },
+      "network_ip": {
+        "default": "mdi:ip-network-outline"
+      },
+      "network_rssi": {
+        "default": "mdi:signal-variant"
+      },
+      "network_ssid": {
+        "default": "mdi:wifi"
+      },
+      "stats_area": {
+        "default": "mdi:floor-plan"
+      },
+      "stats_time": {
+        "default": "mdi:timer-outline"
+      },
+      "total_stats_area": {
+        "default": "mdi:floor-plan"
+      },
+      "total_stats_cleanings": {
+        "default": "mdi:counter"
+      },
+      "total_stats_time": {
+        "default": "mdi:timer-outline"
+      }
+    }
+  }
+}

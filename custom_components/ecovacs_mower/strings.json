@@ -47,5 +47,22 @@
         "self_hosted": "Self-hosted"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "stats_area": { "name": "Mowed area" },
+      "stats_time": { "name": "Mowing time" },
+      "total_stats_area": { "name": "Total mowed area" },
+      "total_stats_time": { "name": "Total mowing time" },
+      "total_stats_cleanings": { "name": "Total mowing sessions" },
+      "network_ip": { "name": "IP address" },
+      "network_rssi": { "name": "Wi-Fi signal strength" },
+      "network_ssid": { "name": "Wi-Fi network" },
+      "error": { "name": "Error" },
+      "lifespan_blade": { "name": "Blades remaining" },
+      "lifespan_lens_brush": { "name": "Lens brush remaining" },
+      "lifespan_trimmer_brush": { "name": "Trimmer brush remaining" },
+      "lifespan_weed_rope": { "name": "Weed rope remaining" }
+    }
   }
 }
