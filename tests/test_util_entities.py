@@ -23,6 +23,23 @@ def test_only_devices_with_the_capability_get_an_entity() -> None:
     class _Description(EcovacsCapabilityEntityDescription):
         pass
 
+    class _Entity:
+        """Stand-in för entity_class.
+
+        Kan inte vara ``Mock`` självt: ``Mock.__init__`` tolkar sitt första
+        positionsargument som ``spec``, och get_supported_entities anropar
+        ``entity_class(device, capability, description)`` positionellt. Med
+        ``device`` som redan är en ``Mock`` krockar det med
+        ``InvalidSpecError: Cannot spec a Mock object``.
+        """
+
+        def __init__(
+            self, device: object, capability: object, description: object
+        ) -> None:
+            self.device = device
+            self.capability = capability
+            self.description = description
+
     has_it = _Description(key="has_it", capability_fn=lambda caps: caps.battery)
     lacks_it = _Description(key="lacks_it", capability_fn=lambda caps: caps.water)
 
@@ -32,6 +49,6 @@ def test_only_devices_with_the_capability_get_an_entity() -> None:
     controller = Mock()
     controller.devices = [device]
 
-    created = get_supported_entities(controller, Mock, (has_it, lacks_it))
+    created = get_supported_entities(controller, _Entity, (has_it, lacks_it))
 
     assert len(created) == 1
