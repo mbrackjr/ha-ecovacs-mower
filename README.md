@@ -135,7 +135,7 @@ Thirty entities on the mower's device page, across six platforms:
 | Platform | Count | What |
 |---|---|---|
 | `lawn_mower` | 1 | Real state (`mowing`, `paused`, `returning`, `docked`, `error`) that updates within seconds, plus working `start_mowing`, `pause`, and `dock` |
-| `sensor` | 14 | Battery, error code, mowed area, mowing time, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name |
+| `sensor` | 14 | Battery, error code (disabled by default — see below), mowed area, mowing time, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name |
 | `switch` | 7 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection |
 | `number` | 2 | Notification volume, cutting direction |
 | `button` | 5 | Reset each of the four consumable lifespans, plus "Locate mower" (plays a sound on the device) |
@@ -147,14 +147,28 @@ no committed date.
 
 ### Entities disabled by default
 
-All seven switches and both number entities (volume, cutting direction)
-ship with `entity_registry_enabled_default=False`, inherited from upstream
-Home Assistant core's `ecovacs` integration — they're advanced settings,
-off by default there too. They appear in the mower's entity list right
-after setup, but stay disabled and report no state until you turn them on
-by hand (device page → the entity → the cog icon → enable). That's expected
-behaviour, not a bug: if one of these looks blank or "unavailable," this is
-why.
+**17 of the 30 entities** ship with `entity_registry_enabled_default=False`,
+all inherited unchanged from upstream Home Assistant core's `ecovacs`
+integration — they're advanced settings or diagnostics, off by default
+there too. They appear in the mower's entity list right after setup, but
+stay disabled and report no state until you turn them on by hand (device
+page → the entity → the cog icon → enable). That's expected behaviour, not
+a bug: if one of these looks blank or "unavailable," this is why.
+
+| Platform | Disabled | Which |
+|---|---|---|
+| `switch` | 7 of 7 | all of them: advanced mode, TrueDetect, edge cutting, child lock, lift warning, boundary crossing warning, safety protection |
+| `number` | 2 of 2 | both: volume, cutting direction |
+| `sensor` | 4 of 14 | IP address, Wi-Fi signal strength, Wi-Fi network name, and **error code** |
+| `button` | 4 of 5 | the four consumable-lifespan resets (blade, lens brush, trimmer brush, weed rope) — "Locate mower" is enabled by default |
+
+**If you're planning anything on the error sensor** — an alarm, a
+notification, a dashboard card — note that it does not exist as an
+enabled entity out of the box. `sensor.<device>_error` is created disabled
+and reports nothing until you enable it by hand, same as the other 16
+above. This is the one entity in this list someone is likely to go
+looking for by name, so it's worth repeating here rather than only in the
+table.
 
 ## Current status
 
