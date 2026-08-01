@@ -54,11 +54,19 @@ def test_every_state_is_mapped() -> None:
 
 
 def test_supported_features() -> None:
+    # LawnMowerEntity använder HA:s CachedProperties-metaklass för
+    # "supported_features", som skriver om klassattributet
+    # ``_attr_supported_features`` till en property. Läst på klassen (utan
+    # instans) ger det property-objektet självt, inte flaggvärdet — därför
+    # läses det via en instans, precis som HA gör vid körning.
+    # ``__new__`` kringgår ``__init__`` (som kräver en riktig ``Device``)
+    # eftersom descriptorn inte beror på att den kört.
     from homeassistant.components.lawn_mower import LawnMowerEntityFeature
 
     from custom_components.ecovacs_mower.lawn_mower import EcovacsMower
 
-    assert EcovacsMower._attr_supported_features == (
+    instance = EcovacsMower.__new__(EcovacsMower)
+    assert instance._attr_supported_features == (
         LawnMowerEntityFeature.DOCK
         | LawnMowerEntityFeature.PAUSE
         | LawnMowerEntityFeature.START_MOWING
