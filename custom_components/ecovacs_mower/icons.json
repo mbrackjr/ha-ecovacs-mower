@@ -48,6 +48,29 @@
       "total_stats_time": {
         "default": "mdi:timer-outline"
       }
+    },
+    "switch": {
+      "advanced_mode": {
+        "default": "mdi:tune"
+      },
+      "border_switch": {
+        "default": "mdi:land-fields"
+      },
+      "child_lock": {
+        "default": "mdi:teddy-bear"
+      },
+      "cross_map_border_warning": {
+        "default": "mdi:border-none-variant"
+      },
+      "move_up_warning": {
+        "default": "mdi:arrow-up-bold-box-outline"
+      },
+      "safe_protect": {
+        "default": "mdi:shield-half-full"
+      },
+      "true_detect": {
+        "default": "mdi:laser-pointer"
+      }
     }
   }
 }

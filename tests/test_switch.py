@@ -43,3 +43,18 @@ def test_every_description_has_a_translation() -> None:
 
     for description in ENTITY_DESCRIPTIONS:
         assert description.translation_key in names, description.key
+
+
+def test_every_switch_has_an_icon() -> None:
+    """En switch utan egen ikon får HA:s generiska toggle — lätt att missa."""
+    import json
+    from pathlib import Path
+
+    from custom_components.ecovacs_mower.switch import ENTITY_DESCRIPTIONS
+
+    root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"
+    icons = json.loads((root / "icons.json").read_text(encoding="utf-8"))
+    names = icons["entity"]["switch"]
+
+    for description in ENTITY_DESCRIPTIONS:
+        assert description.translation_key in names, description.key
