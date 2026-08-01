@@ -17,6 +17,11 @@
         "default": "mdi:string-lights"
       }
     },
+    "event": {
+      "last_job": {
+        "default": "mdi:history"
+      }
+    },
     "number": {
       "cut_direction": {
         "default": "mdi:angle-acute"

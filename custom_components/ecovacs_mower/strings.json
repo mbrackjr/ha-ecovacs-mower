@@ -56,6 +56,20 @@
       "reset_lifespan_trimmer_brush": { "name": "Reset trimmer brush" },
       "reset_lifespan_weed_rope": { "name": "Reset weed rope" }
     },
+    "event": {
+      "last_job": {
+        "name": "Last mowing job",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "finished": "Finished",
+              "finished_with_warnings": "Finished with warnings",
+              "manually_stopped": "Manually stopped"
+            }
+          }
+        }
+      }
+    },
     "number": {
       "volume": { "name": "Volume" },
       "cut_direction": { "name": "Cutting direction" }
