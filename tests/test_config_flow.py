@@ -8,8 +8,6 @@ Sanningskällan är CI på ubuntu-latest.
 
 from unittest.mock import patch
 
-from custom_components.ecovacs_mower.const import CONF_VERIFICATION_CODE, DOMAIN
-
 from . import requires_ha
 
 pytestmark = requires_ha
@@ -26,6 +24,8 @@ AUTH = {
 
 async def _start(hass):
     from homeassistant.config_entries import SOURCE_USER
+
+    from custom_components.ecovacs_mower.const import DOMAIN
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
@@ -77,6 +77,8 @@ async def test_bad_verification_code_reports_error(hass) -> None:
     )
     from homeassistant.data_entry_flow import FlowResultType
 
+    from custom_components.ecovacs_mower.const import CONF_VERIFICATION_CODE
+
     with patch(_AUTHENTICATOR, autospec=True) as authenticator:
         authenticator.return_value.authenticate.side_effect = (
             DeviceVerificationRequiredError
@@ -102,6 +104,8 @@ async def test_device_id_is_persisted_after_verification(hass) -> None:
     from deebot_client.exceptions import DeviceVerificationRequiredError
     from homeassistant.const import CONF_DEVICE_ID
     from homeassistant.data_entry_flow import FlowResultType
+
+    from custom_components.ecovacs_mower.const import CONF_VERIFICATION_CODE
 
     with (
         patch(_AUTHENTICATOR, autospec=True) as authenticator,
