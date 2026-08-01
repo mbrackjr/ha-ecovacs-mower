@@ -63,3 +63,30 @@ def test_every_button_has_an_icon() -> None:
 
     for description in (*ENTITY_DESCRIPTIONS, *LIFESPAN_ENTITY_DESCRIPTIONS):
         assert description.translation_key in names, description.key
+
+
+def test_no_stale_button_translations_or_icons() -> None:
+    """Varje nyckel i strings.json/icons.json ska höra till en riktig knapp.
+
+    Motsatsen till testerna ovan: de kollar beskrivning → sträng/ikon, inte
+    tvärtom. Utan detta skulle en kvarglömd nyckel för en borttagen knapp
+    gå obemärkt förbi.
+    """
+    import json
+    from pathlib import Path
+
+    from custom_components.ecovacs_mower.button import (
+        ENTITY_DESCRIPTIONS,
+        LIFESPAN_ENTITY_DESCRIPTIONS,
+    )
+
+    root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"
+    strings = json.loads((root / "strings.json").read_text(encoding="utf-8"))
+    icons = json.loads((root / "icons.json").read_text(encoding="utf-8"))
+
+    keys = {
+        d.translation_key
+        for d in (*ENTITY_DESCRIPTIONS, *LIFESPAN_ENTITY_DESCRIPTIONS)
+    }
+    assert set(strings["entity"]["button"]) <= keys
+    assert set(icons["entity"]["button"]) <= keys

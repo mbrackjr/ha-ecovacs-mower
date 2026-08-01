@@ -94,3 +94,65 @@ def test_every_description_has_a_translation() -> None:
     for description in descriptions:
         if description.translation_key:
             assert description.translation_key in names, description.key
+
+
+def test_every_sensor_has_an_icon() -> None:
+    """En sensor utan egen ikon får HA:s generiska ikon — lätt att missa.
+
+    Sensor var den första plattformen och skapade ``icons.json``; mönstret
+    med ett ikontest per plattform uppfanns en task senare och har aldrig
+    eftermonterats här förrän nu. Inkluderar ``EcovacsErrorSensor`` av samma
+    skäl som ``test_every_description_has_a_translation``.
+    """
+    import json
+    from pathlib import Path
+
+    from custom_components.ecovacs_mower.sensor import (
+        ENTITY_DESCRIPTIONS,
+        LIFESPAN_ENTITY_DESCRIPTIONS,
+        EcovacsErrorSensor,
+    )
+
+    root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"
+    icons = json.loads((root / "icons.json").read_text(encoding="utf-8"))
+    names = icons["entity"]["sensor"]
+
+    descriptions = (
+        *ENTITY_DESCRIPTIONS,
+        *LIFESPAN_ENTITY_DESCRIPTIONS,
+        EcovacsErrorSensor.entity_description,
+    )
+    for description in descriptions:
+        if description.translation_key:
+            assert description.translation_key in names, description.key
+
+
+def test_no_stale_sensor_translations_or_icons() -> None:
+    """Varje nyckel i strings.json/icons.json ska höra till en riktig sensor.
+
+    Motsatsen till testerna ovan: de kollar beskrivning → sträng/ikon, inte
+    tvärtom. Utan detta skulle en kvarglömd nyckel för en borttagen sensor
+    gå obemärkt förbi.
+    """
+    import json
+    from pathlib import Path
+
+    from custom_components.ecovacs_mower.sensor import (
+        ENTITY_DESCRIPTIONS,
+        LIFESPAN_ENTITY_DESCRIPTIONS,
+        EcovacsErrorSensor,
+    )
+
+    root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"
+    strings = json.loads((root / "strings.json").read_text(encoding="utf-8"))
+    icons = json.loads((root / "icons.json").read_text(encoding="utf-8"))
+
+    descriptions = (
+        *ENTITY_DESCRIPTIONS,
+        *LIFESPAN_ENTITY_DESCRIPTIONS,
+        EcovacsErrorSensor.entity_description,
+    )
+    keys = {d.translation_key for d in descriptions if d.translation_key}
+
+    assert set(strings["entity"]["sensor"]) <= keys
+    assert set(icons["entity"]["sensor"]) <= keys

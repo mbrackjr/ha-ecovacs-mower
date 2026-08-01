@@ -46,7 +46,10 @@ def test_missing_device_id_is_generated() -> None:
 def test_supported_lifespans_are_the_four_a_mower_has() -> None:
     """Endast de komponenter 2i0fns faktiskt deklarerar.
 
-    Core listar 17 lifespans, varav 13 är moppar, dammpåsar och filter.
+    Core exponerar 12 av ``LifeSpan``-enumens 26 medlemmar, samtliga
+    dammsugarinriktade. BLADE och LENS_BRUSH ingår i den listan; TRIMMER_BRUSH
+    och WEED_ROPE gör det inte alls — de är gräsklipparspecifika komponenter
+    core aldrig exponerar.
     """
     from deebot_client.events import LifeSpan
 

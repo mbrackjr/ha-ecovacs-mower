@@ -80,3 +80,24 @@ def test_last_job_entity_has_an_icon() -> None:
     icons = json.loads((root / "icons.json").read_text(encoding="utf-8"))
     key = EcovacsLastJobEventEntity.entity_description.translation_key
     assert key in icons["entity"]["event"]
+
+
+def test_no_stale_event_translations_or_icons() -> None:
+    """Varje nyckel i strings.json/icons.json ska höra till en riktig händelse.
+
+    Motsatsen till testerna ovan: de kollar beskrivning → sträng/ikon, inte
+    tvärtom. Utan detta skulle en kvarglömd nyckel för en borttagen
+    händelseentitet gå obemärkt förbi.
+    """
+    import json
+    from pathlib import Path
+
+    from custom_components.ecovacs_mower.event import EcovacsLastJobEventEntity
+
+    root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"
+    strings = json.loads((root / "strings.json").read_text(encoding="utf-8"))
+    icons = json.loads((root / "icons.json").read_text(encoding="utf-8"))
+    key = EcovacsLastJobEventEntity.entity_description.translation_key
+
+    assert set(strings["entity"]["event"]) <= {key}
+    assert set(icons["entity"]["event"]) <= {key}
