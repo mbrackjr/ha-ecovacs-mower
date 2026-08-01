@@ -130,27 +130,64 @@ Enter it and setup continues.
 
 ## What you get
 
-One entity: `lawn_mower.<name>`, with:
+Thirty entities on the mower's device page, across six platforms:
 
-- Real state (`mowing`, `paused`, `returning`, `docked`, `error`) that
-  updates within seconds of the mower actually changing state, not once a
-  day
-- Working `start_mowing`, `pause`, and `dock` services
+| Platform | Count | What |
+|---|---|---|
+| `lawn_mower` | 1 | Real state (`mowing`, `paused`, `returning`, `docked`, `error`) that updates within seconds, plus working `start_mowing`, `pause`, and `dock` |
+| `sensor` | 14 | Battery, error code (disabled by default — see below), mowed area, mowing time, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name |
+| `switch` | 7 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection |
+| `number` | 2 | Notification volume, cutting direction |
+| `button` | 5 | Reset each of the four consumable lifespans, plus "Locate mower" (plays a sound on the device) |
+| `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped) |
 
-That's it for this release. Not included: sensors (battery, area mowed,
-consumable lifespans), switches, buttons, RTK diagnostics, zone control, and
-maps. All of those are planned but not built yet — this release is
-deliberately scoped to fixing the broken part: state and control.
+Not included yet: **RTK diagnostics** (position and satellite data), zone
+control, and maps. RTK is planned for the next release; the other two have
+no committed date.
+
+### Entities disabled by default
+
+**17 of the 30 entities** ship with `entity_registry_enabled_default=False`,
+all inherited unchanged from upstream Home Assistant core's `ecovacs`
+integration — they're advanced settings or diagnostics, off by default
+there too. They appear in the mower's entity list right after setup, but
+stay disabled and report no state until you turn them on by hand (device
+page → the entity → the cog icon → enable). That's expected behaviour, not
+a bug: if one of these looks blank or "unavailable," this is why.
+
+| Platform | Disabled | Which |
+|---|---|---|
+| `switch` | 7 of 7 | all of them: advanced mode, TrueDetect, edge cutting, child lock, lift warning, boundary crossing warning, safety protection |
+| `number` | 2 of 2 | both: volume, cutting direction |
+| `sensor` | 4 of 14 | IP address, Wi-Fi signal strength, Wi-Fi network name, and **error code** |
+| `button` | 4 of 5 | the four consumable-lifespan resets (blade, lens brush, trimmer brush, weed rope) — "Locate mower" is enabled by default |
+
+**If you're planning anything on the error sensor** — an alarm, a
+notification, a dashboard card — note that it does not exist as an
+enabled entity out of the box. `sensor.<device>_error` is created disabled
+and reports nothing until you enable it by hand, same as the other 16
+above. This is the one entity in this list someone is likely to go
+looking for by name, so it's worth repeating here rather than only in the
+table.
 
 ## Current status
 
-The code is complete for this release and CI is green: hassfest validation,
-HACS validation, and the test suite (78 tests) all pass. It has **not yet
-been verified against real hardware** — that verification is the next step
-before this is considered done, and hasn't happened yet. Install with that
-in mind. If you try it and it works (or doesn't), an issue report — with
-your device class from the warning above if it's not the O1200 — is useful
-either way.
+The `lawn_mower` entity is confirmed working against a real O1200: state
+tracks the mower within seconds, and `start_mowing`, `pause`, and `dock` all
+do what they should. That was the whole of phase 1 and hasn't changed.
+
+Phase 2 (this release) adds the `sensor`, `switch`, `number`, `button`, and
+`event` platforms listed above. The test suite and hassfest validation both
+pass in CI. The HACS validation job reports failures for `topics` and
+`brands`, which are requirements for listing in the HACS default store and do
+not affect installation as a custom repository.
+
+But **none of these new entities have been verified against real hardware
+yet.** That
+verification is the next step and hasn't happened. Install with that in
+mind. If something doesn't match what's documented here, an issue report is
+useful — include your device class from the warning above if you're not on
+the O1200.
 
 ## License and credit
 

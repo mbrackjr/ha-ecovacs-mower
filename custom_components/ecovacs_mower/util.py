@@ -1,23 +1,32 @@
 """Ecovacs util functions.
 
 Forkad från Home Assistant core (``homeassistant/components/ecovacs/util.py``).
-``get_name_key``, ``get_options`` och ``get_supported_entities`` är borttagna —
-de används bara av select-, sensor- och switchplattformarna, som kommer i fas 2.
-
-Att ``get_supported_entities`` är borta lämnar ``EcovacsDescriptionEntity`` och
-``EcovacsCapabilityEntityDescription`` i ``entity.py`` utan anropare. De står
-kvar med flit: de är forkade basklasser från kärnan som fas 2 behöver, och att
-härleda dem igen är sämre än att bära dem.
+``get_options`` är fortfarande borttagen — den används bara av select-
+plattformen, som denna integration inte har. ``get_supported_entities``
+är återställd i fas 2: sensor-, switch-, number- och buttonplattformarna
+använder den för att bygga sina entiteter ur ``EcovacsCapabilityEntityDescription``.
+``get_name_key`` är återställd i samma fas för eventplattformen, som mappar
+``CleanJobStatus`` till de tillståndsnycklar strings.json deklarerar.
 """
 
 from collections.abc import Mapping
+from enum import Enum
 import random
 import string
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.const import CONF_DEVICE_ID
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import slugify
+
+from .entity import (
+    EcovacsCapabilityEntityDescription,
+    EcovacsDescriptionEntity,
+    EcovacsEntity,
+)
+
+if TYPE_CHECKING:
+    from .controller import EcovacsController
 
 
 def get_client_device_id(
@@ -32,3 +41,23 @@ def get_client_device_id(
     return "".join(
         random.choice(string.ascii_uppercase + string.digits) for _ in range(8)
     )
+
+
+def get_supported_entities(
+    controller: "EcovacsController",
+    entity_class: type[EcovacsDescriptionEntity],
+    descriptions: tuple[EcovacsCapabilityEntityDescription, ...],
+) -> list[EcovacsEntity]:
+    """Return all supported entities for all devices."""
+    return [
+        entity_class(device, capability, description)
+        for device in controller.devices
+        for description in descriptions
+        if (capability := description.capability_fn(device.capabilities))
+    ]
+
+
+@callback
+def get_name_key(enum: Enum) -> str:
+    """Return the lower case name of the enum."""
+    return enum.name.lower()

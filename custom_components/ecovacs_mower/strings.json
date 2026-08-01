@@ -47,5 +47,56 @@
         "self_hosted": "Self-hosted"
       }
     }
+  },
+  "entity": {
+    "button": {
+      "play_sound": { "name": "Locate mower" },
+      "reset_lifespan_blade": { "name": "Reset blades" },
+      "reset_lifespan_lens_brush": { "name": "Reset lens brush" },
+      "reset_lifespan_trimmer_brush": { "name": "Reset trimmer brush" },
+      "reset_lifespan_weed_rope": { "name": "Reset weed rope" }
+    },
+    "event": {
+      "last_job": {
+        "name": "Last mowing job",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "finished": "Finished",
+              "finished_with_warnings": "Finished with warnings",
+              "manually_stopped": "Manually stopped"
+            }
+          }
+        }
+      }
+    },
+    "number": {
+      "volume": { "name": "Volume" },
+      "cut_direction": { "name": "Cutting direction" }
+    },
+    "sensor": {
+      "stats_area": { "name": "Mowed area" },
+      "stats_time": { "name": "Mowing time" },
+      "total_stats_area": { "name": "Total mowed area" },
+      "total_stats_time": { "name": "Total mowing time" },
+      "total_stats_cleanings": { "name": "Total mowing sessions" },
+      "network_ip": { "name": "IP address" },
+      "network_rssi": { "name": "Wi-Fi signal strength" },
+      "network_ssid": { "name": "Wi-Fi network" },
+      "error": { "name": "Error" },
+      "lifespan_blade": { "name": "Blades remaining" },
+      "lifespan_lens_brush": { "name": "Lens brush remaining" },
+      "lifespan_trimmer_brush": { "name": "Trimmer brush remaining" },
+      "lifespan_weed_rope": { "name": "Weed rope remaining" }
+    },
+    "switch": {
+      "advanced_mode": { "name": "Advanced mode" },
+      "true_detect": { "name": "TrueDetect obstacle avoidance" },
+      "border_switch": { "name": "Edge cutting" },
+      "child_lock": { "name": "Child lock" },
+      "move_up_warning": { "name": "Lift warning" },
+      "cross_map_border_warning": { "name": "Boundary crossing warning" },
+      "safe_protect": { "name": "Safety protection" }
+    }
   }
 }
