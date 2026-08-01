@@ -61,7 +61,12 @@ ENTITY_DESCRIPTIONS: tuple[EcovacsButtonEntityDescription, ...] = (
         capability_fn=lambda caps: caps.play_sound,
         key="play_sound",
         translation_key="play_sound",
-        entity_category=EntityCategory.DIAGNOSTIC,
+        # Medvetet utan entity_category. Att lokalisera klipparen är en åtgärd
+        # man tar till när den fastnat, inte felsökningsdata, så den hör hemma
+        # bland kontrollerna. HA exponerar dessutom inte diagnostik- och
+        # konfigurationsentiteter till röstassistenter som standard — och att
+        # kunna be klipparen låta är just vad man vill kunna göra utan att
+        # först leta upp den i gränssnittet.
     ),
 )
 

@@ -177,9 +177,13 @@ tracks the mower within seconds, and `start_mowing`, `pause`, and `dock` all
 do what they should. That was the whole of phase 1 and hasn't changed.
 
 Phase 2 (this release) adds the `sensor`, `switch`, `number`, `button`, and
-`event` platforms listed above. CI is green — hassfest validation, HACS
-validation, and the test suite (105 tests) all pass — but **none of these
-new entities have been verified against real hardware yet.** That
+`event` platforms listed above. The test suite and hassfest validation both
+pass in CI. The HACS validation job reports failures for `topics` and
+`brands`, which are requirements for listing in the HACS default store and do
+not affect installation as a custom repository.
+
+But **none of these new entities have been verified against real hardware
+yet.** That
 verification is the next step and hasn't happened. Install with that in
 mind. If something doesn't match what's documented here, an issue report is
 useful — include your device class from the warning above if you're not on
