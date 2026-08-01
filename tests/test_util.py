@@ -41,3 +41,38 @@ def test_missing_device_id_is_generated() -> None:
     assert device_id
     assert len(device_id) == 8
     assert set(device_id) <= _DEVICE_ID_ALPHABET
+
+
+def test_supported_lifespans_are_the_four_a_mower_has() -> None:
+    """Endast de komponenter 2i0fns faktiskt deklarerar.
+
+    Core listar 17 lifespans, varav 13 är moppar, dammpåsar och filter.
+    """
+    from deebot_client.events import LifeSpan
+
+    from custom_components.ecovacs_mower.const import SUPPORTED_LIFESPANS
+
+    assert set(SUPPORTED_LIFESPANS) == {
+        LifeSpan.BLADE,
+        LifeSpan.LENS_BRUSH,
+        LifeSpan.TRIMMER_BRUSH,
+        LifeSpan.WEED_ROPE,
+    }
+
+
+def test_supported_lifespans_match_the_target_device() -> None:
+    """Vår lista får inte innehålla något enheten saknar."""
+    import asyncio
+
+    from deebot_client.hardware import _DEVICES, get_static_device_info
+
+    from custom_components.ecovacs_mower.const import SUPPORTED_LIFESPANS
+
+    # get_static_device_info seedar den globala cachen. Repokonventionen är att
+    # lämna den som vi fann den — se tests/deebot_patch/test_hardware.py.
+    try:
+        info = asyncio.run(get_static_device_info("2i0fns"))
+        assert info is not None
+        assert set(SUPPORTED_LIFESPANS) <= set(info.capabilities.life_span.types)
+    finally:
+        _DEVICES.pop("2i0fns", None)

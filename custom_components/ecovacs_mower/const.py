@@ -2,6 +2,8 @@
 
 from enum import StrEnum
 
+from deebot_client.events import LifeSpan
+
 DOMAIN = "ecovacs_mower"
 
 # Speglar manifest.json:s issue_tracker. Används i loggmeddelanden, som inte
@@ -19,3 +21,13 @@ class InstanceMode(StrEnum):
 
     CLOUD = "cloud"
     SELF_HOSTED = "self_hosted"
+
+
+# Endast de livslängdskomponenter en gräsklippare faktiskt har. Core listar 17;
+# de övriga 13 är moppar, dammpåsar, filter och UV-lampor.
+SUPPORTED_LIFESPANS = (
+    LifeSpan.BLADE,
+    LifeSpan.LENS_BRUSH,
+    LifeSpan.TRIMMER_BRUSH,
+    LifeSpan.WEED_ROPE,
+)
