@@ -90,8 +90,7 @@ async def async_setup_entry(
         for description in LIFESPAN_ENTITY_DESCRIPTIONS
         if description.component in device.capabilities.life_span.types
     )
-    if entities:
-        async_add_entities(entities)
+    async_add_entities(entities)
 
 
 class EcovacsButtonEntity(
