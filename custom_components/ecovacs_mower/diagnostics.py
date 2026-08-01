@@ -14,6 +14,12 @@ from .const import CONF_OVERRIDE_MQTT_URL, CONF_OVERRIDE_REST_URL
 # CONF_OVERRIDE_MQTT_URL/CONF_OVERRIDE_REST_URL redactas för att
 # självhostade installationer inte ska läcka sin interna broker- eller
 # REST-adress i en diagnostikrapport som delas i ett GitHub-ärende.
+#
+# "homeId" redactas trots att det inte finns i ApiDeviceInfo-TypedDicten:
+# api_client.py matar rå API-JSON rakt in i den, så nycklar utanför
+# TypedDict-formen försvinner inte — de följer ändå med i
+# device.device_info och hamnar i dumpen. Samma läckmekanism som
+# override-URL:erna.
 REDACT = {
     CONF_USERNAME,
     CONF_PASSWORD,
@@ -21,6 +27,7 @@ REDACT = {
     CONF_OVERRIDE_REST_URL,
     "did",
     "name",
+    "homeId",
     "mac",
 }
 
