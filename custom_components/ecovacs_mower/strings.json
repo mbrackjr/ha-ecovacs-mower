@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "data": { "mode": "Installation mode" },
+        "description": "Choose how to connect to your mower."
+      },
+      "auth": {
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "country": "Country",
+          "override_rest_url": "REST URL",
+          "override_mqtt_url": "MQTT URL",
+          "verify_mqtt_certificate": "Verify MQTT certificate"
+        },
+        "description": "Sign in with your Ecovacs account."
+      },
+      "device_verification": {
+        "data": { "verification_code": "Verification code" },
+        "title": "Verify this device",
+        "description": "Ecovacs sent a verification code to {username}. Enter it to authorise Home Assistant. This is required once per installation."
+      },
+      "reauth_confirm": {
+        "data": { "password": "Password" },
+        "description": "Re-enter the password for {username}."
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "invalid_verification_code": "That verification code was not accepted",
+      "invalid_url": "Invalid URL",
+      "invalid_url_schema_override_rest_url": "URL must start with http:// or https://",
+      "invalid_url_schema_override_mqtt_url": "URL must start with mqtt:// or mqtts://",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Account is already configured",
+      "reauth_successful": "Re-authentication was successful"
+    }
+  },
+  "selector": {
+    "installation_mode": {
+      "options": {
+        "cloud": "Ecovacs cloud",
+        "self_hosted": "Self-hosted"
+      }
+    }
+  }
+}
