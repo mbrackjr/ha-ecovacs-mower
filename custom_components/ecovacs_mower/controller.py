@@ -14,6 +14,7 @@ from typing import Any
 
 from deebot_client.api_client import ApiClient
 from deebot_client.authentication import Authenticator, create_rest_config
+from deebot_client.capabilities import DeviceType
 from deebot_client.const import UNDEFINED, UndefinedType
 from deebot_client.device import Device
 from deebot_client.exceptions import (
@@ -43,6 +44,7 @@ from .const import (
     CONF_OVERRIDE_MQTT_URL,
     CONF_OVERRIDE_REST_URL,
     CONF_VERIFY_MQTT_CERTIFICATE,
+    ISSUE_TRACKER_URL,
 )
 from .deebot_patch import (
     PatchContractError,
@@ -107,14 +109,31 @@ class EcovacsController:
                 device_class = info.api["class"]
                 if device_class in SUPPORTED_CLASSES:
                     verify_capabilities(info.static.capabilities, device_class)
+                elif info.static.capabilities.device_type is DeviceType.MOWER:
+                    # Warning: samtliga 25 MOWER-klasser i deebot-client 18.5.1
+                    # bär samma CleanV2/GetCleanInfoV2-fel, men SUPPORTED_CLASSES
+                    # täcker bara 2i0fns. En annan klippare får alltså en entitet
+                    # vars reglage är döda och vars tillstånd släpar — exakt det
+                    # symtom projektet finns för att eliminera. Den användaren ska
+                    # inte behöva läsa debugloggen för att förstå varför.
+                    #
+                    # Predikatet är detsamma som lawn_mower.py använder för att
+                    # avgöra vad som blir en entitet, så varningen kan inte
+                    # falsklarma på en dammsugare.
+                    _LOGGER.warning(
+                        "Gräsklipparklass %s stöds inte av den här "
+                        "integrationen och används opatchad: styrningen kommer "
+                        "sannolikt inte att fungera och tillståndet att släpa. "
+                        "Rapportera modellen på %s så kan den läggas till",
+                        device_class,
+                        ISSUE_TRACKER_URL,
+                    )
                 else:
                     # Debug, inte warning: en vanlig Deebot-dammsugare på samma
-                    # konto hamnar helt korrekt här, opatchad, och en varning
-                    # vore falsklarm. Spåret finns för det fall som faktiskt är
-                    # värt att se — en annan gräsklipparmodell, som behöver
-                    # läggas till i SUPPORTED_CLASSES.
+                    # konto hamnar helt korrekt här, opatchad. Den blir ingen
+                    # entitet och har inget fel att rätta — inget att säga.
                     _LOGGER.debug(
-                        "Enhetsklass %s ligger utanför fas 1 och används "
+                        "Enhetsklass %s är ingen gräsklippare och används "
                         "opatchad, utan kapabilitetskontroll",
                         device_class,
                     )

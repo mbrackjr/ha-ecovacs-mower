@@ -110,6 +110,135 @@ def test_verification_reads_static_device_info() -> None:
     assert "info.static.capabilities" in source
 
 
+# En annan GOAT-klass än den enda i SUPPORTED_CLASSES. Samtliga 25
+# MOWER-klasser i deebot-client 18.5.1 bär samma CleanV2/GetCleanInfoV2-fel,
+# så den här enheten blir en entitet med döda reglage.
+_OTHER_MOWER = "cr0e4u"
+# T5PRO-dammsugare: giltig klass, DeviceType.VACUUM, blir aldrig en entitet.
+_VACUUM = "npwtuz"
+
+
+async def _initialize_with(hass: object, device_classes: tuple[str, ...]) -> None:
+    """Kör ``initialize()`` med enheterna *device_classes* från API:et.
+
+    Allt utanför verifieringsloopen mockas: get_devices, MQTT-klienten och
+    Device. Det som testas är vilken gren en klass hamnar i, inte uppkoppling.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from deebot_client.api_client import Devices
+    from deebot_client.hardware import _DEVICES, get_static_device_info
+    from deebot_client.models import DeviceInfo
+    from homeassistant.const import (
+        CONF_COUNTRY,
+        CONF_DEVICE_ID,
+        CONF_PASSWORD,
+        CONF_USERNAME,
+    )
+
+    from custom_components.ecovacs_mower.controller import EcovacsController
+
+    async def fake_get_devices() -> Devices:
+        # Byggs vid anropet, inte i förväg: den riktiga get_devices() körs
+        # efter patch_device_info() och plockar upp de patchade
+        # kapabiliteterna ur cachen. Byggdes DeviceInfo innan initialize()
+        # skulle den stödda klassen bära den opatchade definitionen och
+        # verifieringen falla — på testets uppställning, inte på koden.
+        return Devices(
+            mqtt=[
+                DeviceInfo(
+                    {
+                        "class": class_,
+                        "company": "eco-ng",
+                        "did": f"did-{class_}",
+                        "name": f"name-{class_}",
+                        "resource": "res",
+                    },
+                    await get_static_device_info(class_),
+                )
+                for class_ in device_classes
+            ],
+            xmpp=[],
+            not_supported=[],
+        )
+
+    controller = EcovacsController(
+        hass,  # type: ignore[arg-type]
+        {
+            CONF_DEVICE_ID: "STABLE-ID",
+            CONF_COUNTRY: "SE",
+            CONF_USERNAME: "user@example.com",
+            CONF_PASSWORD: "hunter2",
+        },
+    )
+    try:
+        with (
+            patch(
+                "deebot_client.api_client.ApiClient.get_devices",
+                AsyncMock(side_effect=fake_get_devices),
+            ),
+            patch.object(EcovacsController, "_get_mqtt_client", AsyncMock()),
+            patch(
+                "custom_components.ecovacs_mower.controller.Device",
+                MagicMock(return_value=AsyncMock()),
+            ),
+        ):
+            await controller.initialize()
+    finally:
+        await controller.teardown()
+        # initialize() såddar cachen globalt; lämna den som vi fann den.
+        for class_ in ("2i0fns", *device_classes):
+            _DEVICES.pop(class_, None)
+
+
+async def test_unsupported_mower_class_warns(hass, caplog) -> None:
+    """En gräsklippare utanför SUPPORTED_CLASSES får inte tystna i debug.
+
+    Den användaren får en entitet vars reglage är döda och vars tillstånd
+    släpar — exakt produktionssymtomet projektet finns för att eliminera.
+    Varningen ska namnge klassen, så att modellen går att rapportera och
+    läggas till i SUPPORTED_CLASSES.
+    """
+    import logging
+
+    from custom_components.ecovacs_mower.const import ISSUE_TRACKER_URL
+
+    caplog.set_level(logging.DEBUG)
+    await _initialize_with(hass, (_OTHER_MOWER,))
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert _OTHER_MOWER in message
+    assert ISSUE_TRACKER_URL in message
+
+
+async def test_vacuum_on_the_same_account_stays_quiet(hass, caplog) -> None:
+    """Motprovet: en dammsugare är inget falsklarm värt.
+
+    Utan det här testet vore ``elif ... is DeviceType.MOWER`` i controllern
+    oprövat i sin negativa riktning, och en förenkling till "varna för allt
+    som inte stöds" skulle passera grönt.
+    """
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    await _initialize_with(hass, (_VACUUM,))
+
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any(_VACUUM in r.getMessage() for r in caplog.records)
+
+
+async def test_supported_mower_is_verified(hass, caplog) -> None:
+    """Den stödda klassen ska gå genom verifieringen, utan varning."""
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    await _initialize_with(hass, ("2i0fns",))
+
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
 def _forbidden_imports(path: Path) -> list[str]:
     """Returnera förbjudna uppströmsmoduler som importeras i *path*.
 
