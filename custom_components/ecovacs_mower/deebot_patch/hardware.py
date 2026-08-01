@@ -44,14 +44,14 @@ async def patch_device_info(class_: str) -> None:
     fått de opatchade kapabiliteterna.
     """
     if class_ not in SUPPORTED_CLASSES:
-        _LOGGER.debug("Enhetsklass %s stöds inte av fas 1, patchas inte", class_)
+        _LOGGER.debug("Device class %s not supported by phase 1, not patching", class_)
         return
 
     base = await get_static_device_info(class_)
     if base is None:
         # Uppströms returnerar None för okända klasser; ingen fallbackdefinition
         # finns, så här är det inget att patcha.
-        _LOGGER.debug("Ingen enhetsdefinition för %s, hoppar över patch", class_)
+        _LOGGER.debug("No device definition for %s, skipping patch", class_)
         return
 
     capabilities = base.capabilities
@@ -67,4 +67,4 @@ async def patch_device_info(class_: str) -> None:
         state=CapabilityEvent(StateEvent, [GetChargeState(), GetCleanInfo()]),
     )
     _DEVICES[class_] = replace(base, capabilities=patched)
-    _LOGGER.debug("Patchade kapabiliteter för %s", class_)
+    _LOGGER.debug("Patched capabilities for %s", class_)

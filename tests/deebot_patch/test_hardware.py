@@ -167,7 +167,7 @@ async def test_verify_capabilities_raises_on_unpatched_object() -> None:
     )
 
     info = await get_static_device_info(O1200)
-    with pytest.raises(PatchContractError, match="för sent"):
+    with pytest.raises(PatchContractError, match="too late"):
         verify_capabilities(info.capabilities, O1200)
 
 

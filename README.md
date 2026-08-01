@@ -80,14 +80,10 @@ to the original symptoms (dead controls, stale state). It logs a warning
 naming the device class it saw and didn't recognize, for example:
 
 ```
-Gräsklipparklass <class> stöds inte av den här integrationen och används
-opatchad: styrningen kommer sannolikt inte att fungera och tillståndet att
-släpa. Rapportera modellen på <issue tracker> så kan den läggas till
-```
-
-("Mower class `<class>` is not supported by this integration and is used
+Mower class <class> is not supported by this integration and is used
 unpatched: controls will likely not work and state will lag. Report the
-model at `<issue tracker>` so it can be added.")
+model at <issue tracker> so it can be added
+```
 
 That device class string is exactly what to paste into a
 [new issue](https://github.com/nord-/ha-ecovacs-mower/issues). Adding a

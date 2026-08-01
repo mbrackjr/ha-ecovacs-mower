@@ -40,9 +40,9 @@ class PatchContractError(Exception):
 def _fail(what: str) -> NoReturn:
     installed = version("deebot-client")
     raise PatchContractError(
-        f"deebot-client {installed} matchar inte vad ecovacs_mower förväntar sig: "
-        f"{what}. Integrationen vägrar starta hellre än att tyst sluta "
-        f"rapportera gräsklipparens tillstånd. Rapportera på "
+        f"deebot-client {installed} does not match what ecovacs_mower expects: "
+        f"{what}. The integration refuses to start rather than silently stop "
+        f"reporting the mower's state. Report at "
         f"https://github.com/nord-/ha-ecovacs-mower/issues"
     )
 
@@ -50,9 +50,9 @@ def _fail(what: str) -> NoReturn:
 def apply() -> None:
     """Registrera våra meddelandehandlare. Idempotent."""
     if not isinstance(_DEVICES, dict):
-        _fail("deebot_client.hardware._DEVICES är ingen dict")
+        _fail("deebot_client.hardware._DEVICES is not a dict")
     if not isinstance(MESSAGES, dict):
-        _fail("deebot_client.messages.json.MESSAGES är ingen dict")
+        _fail("deebot_client.messages.json.MESSAGES is not a dict")
 
     # Muteras på plats: messages/__init__.py håller en referens till samma
     # objekt, och en ombindning skulle därför inte synas i get_message().
@@ -60,11 +60,11 @@ def apply() -> None:
         MESSAGES[message.NAME] = message
 
     if MESSAGES.get("onChargeInfo") is not OnChargeInfo:
-        _fail("registrering av onChargeInfo tog inte")
+        _fail("registration of onChargeInfo did not take")
     if MESSAGES.get("onScheduleTaskInfo") is not OnScheduleTaskInfo:
-        _fail("registrering av onScheduleTaskInfo tog inte")
+        _fail("registration of onScheduleTaskInfo did not take")
 
-    _LOGGER.debug("Meddelandehandlare registrerade")
+    _LOGGER.debug("Message handlers registered")
 
 
 def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
@@ -77,8 +77,8 @@ def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
     """
     if capabilities.clean.action.command is not CleanMower:
         _fail(
-            f"enheten {class_} byggdes med {capabilities.clean.action.command.__name__} "
-            f"i stället för CleanMower — patchen kördes för sent"
+            f"device {class_} was built with {capabilities.clean.action.command.__name__} "
+            f"instead of CleanMower — the patch ran too late"
         )
 
     # Exakt typjämförelse, inte isinstance: GetCleanInfoV2 ärver GetCleanInfo,
@@ -86,4 +86,4 @@ def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
     # fånga. Kontrollen hade varit tandlös.
     commands = capabilities.get_refresh_commands(StateEvent)
     if not any(type(c) is GetCleanInfo for c in commands):
-        _fail(f"GetCleanInfo saknas i tillståndskommandona för {class_}")
+        _fail(f"GetCleanInfo is missing from the state commands for {class_}")

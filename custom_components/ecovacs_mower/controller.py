@@ -121,10 +121,10 @@ class EcovacsController:
                     # avgöra vad som blir en entitet, så varningen kan inte
                     # falsklarma på en dammsugare.
                     _LOGGER.warning(
-                        "Gräsklipparklass %s stöds inte av den här "
-                        "integrationen och används opatchad: styrningen kommer "
-                        "sannolikt inte att fungera och tillståndet att släpa. "
-                        "Rapportera modellen på %s så kan den läggas till",
+                        "Mower class %s is not supported by this integration "
+                        "and is used unpatched: controls will likely not work "
+                        "and state will lag. Report the model at %s so it can "
+                        "be added",
                         device_class,
                         ISSUE_TRACKER_URL,
                     )
@@ -133,8 +133,8 @@ class EcovacsController:
                     # konto hamnar helt korrekt här, opatchad. Den blir ingen
                     # entitet och har inget fel att rätta — inget att säga.
                     _LOGGER.debug(
-                        "Enhetsklass %s är ingen gräsklippare och används "
-                        "opatchad, utan kapabilitetskontroll",
+                        "Device class %s is not a mower and is used "
+                        "unpatched, without capability verification",
                         device_class,
                     )
 

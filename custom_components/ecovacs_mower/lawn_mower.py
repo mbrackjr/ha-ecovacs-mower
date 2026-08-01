@@ -48,7 +48,7 @@ async def async_setup_entry(
         for device in controller.devices
         if device.capabilities.device_type is DeviceType.MOWER
     ]
-    _LOGGER.debug("Lägger till gräsklippare: %s", mowers)
+    _LOGGER.debug("Adding mowers: %s", mowers)
     async_add_entities(mowers)
 
 
@@ -75,7 +75,7 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
         async def on_status(event: StateEvent) -> None:
             activity = _STATE_TO_MOWER_STATE.get(event.state)
             if activity is None:
-                _LOGGER.warning("Ohanterat tillstånd från enheten: %s", event.state)
+                _LOGGER.warning("Unhandled state from device: %s", event.state)
                 return
             self._attr_activity = activity
             self.async_write_ha_state()
