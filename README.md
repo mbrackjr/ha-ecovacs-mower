@@ -1,8 +1,8 @@
 # Ecovacs Mower for Home Assistant
 
 A Home Assistant custom integration for Ecovacs GOAT robot mowers, built to
-work around three defects in the upstream `ecovacs` integration that leave
-GOAT mowers effectively unusable.
+work around defects in the upstream `ecovacs` integration that leave GOAT
+mowers effectively unusable.
 
 If you own a GOAT mower and its state in Home Assistant is stuck, and
 start/pause do nothing, this is likely why:
@@ -170,13 +170,13 @@ plus one per UWB beacon on the models that use them:
 | Platform | Count | What |
 |---|---|---|
 | `lawn_mower` | 1 | Real state (`mowing`, `paused`, `returning`, `docked`, `error`) that updates within seconds, plus working `start_mowing`, `pause`, and `dock` |
-| `sensor` | 16 + one per beacon | Activity (the mower's state with the reason folded in — `returning_rain`, `docked_rain_delay`; see below), battery, error code (disabled by default — see below), mowing progress (see below), mowed area, mowing time, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name, and on a beacon-guided mower one battery percentage per UWB beacon (see below) |
+| `sensor` | 16 + one per beacon | Activity (the mower's state with the reason folded in — `returning_rain`, `docked_rain_delay`; see below), battery, error code (disabled by default — see below), mowing progress (see below), job target area, job target duration, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name, and on a beacon-guided mower one battery percentage per UWB beacon (see below) |
 | `binary_sensor` | 6 | Fault — a latched problem that stays on until the mower recovers or you clear it (see below) — plus rain sensor, rain delay, emergency stop, locked, animal protection: the mower's raw protection flags, from the `onProtectState` message the library drops (see below) |
 | `switch` | 8 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection, rain detection (see below) |
 | `number` | 3 | Notification volume, cutting direction, rain delay duration (see below) |
 | `button` | 6 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), and "Clear fault" (releases the latched fault; see below) |
 | `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped — see below) |
-| `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, and `onMapTrace` on firmware 1.17); the format is documented in `docs/superpowers/specs/2026-08-10-mower-map-design.md`. Geometry survives restarts; the position track is live-only |
+| `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, and `onMapTrace` on firmware 1.17); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
 
 Not included yet: **RTK diagnostics** (position and satellite data) and
 zone control. RTK is planned for the next release; the other has no
@@ -598,20 +598,16 @@ minutes: the mower does not always announce that it has finished and docked,
 and without a poll the entity keeps reporting the run it is no longer doing. Its start command is also confirmed on an O800 RTK by
 the user who reported that model.
 
-The `sensor`, `switch`, `number`, `button`, and `event` platforms listed above
-were added in 0.2.0. The `image` entity (the mower's map) was added in 0.3.0;
-0.5.2 fixed its position track, which firmware 1.13.10 broke by flagging most
-position samples `invalid: 2`.
 The test suite, hassfest and HACS validation all pass in CI. The HACS job
 skips the `brands` check, which requires an icon in the Home Assistant brands
 repository — a requirement for listing in the HACS default store that does
 not affect installation as a custom repository.
 
-But **none of those entities have been verified against real hardware yet.**
-That verification hasn't happened. Install with that in mind. If something
-doesn't match what's documented here, an issue report is useful — include
-your device class from the warning above if you're not on one of the models
-in the table.
+See the [Hardware support](#hardware-support) table above for which entities
+have been confirmed against real hardware, model by model. If you install this
+and something doesn't match what's documented here, an issue report is
+useful — include your device class from the warning above if you're not on
+one of the models in the table.
 
 ## License and credit
 
