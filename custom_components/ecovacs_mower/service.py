@@ -15,7 +15,8 @@ SERVICE_MOW_AREA = "mow_area"
 SERVICE_SCHEMA = vol.Schema(
     {
         vol.Required("area_ids"): vol.All(cv.ensure_list, [vol.Coerce(int)]),
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 
