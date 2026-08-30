@@ -48,12 +48,19 @@ class MowerStateRecord:
         self.suppressed = None
 
     def start_job(self, job_type: str) -> None:
-        """Remember the job type reported by the mower."""
+        """Remember the latest mowing job type reported by the mower."""
         self.job_type = job_type
 
-    def stop_job(self) -> None:
-        """Forget the completed or stopped job."""
-        self.job_type = None
+    def stop_job(self, job_type: str) -> None:
+        """Forget a job only when its own stop message is still current.
+
+        Job-edge messages are the source of truth here, rather than the generic
+        mower state. That keeps transient ``IDLE``/``PAUSED`` transitions out of
+        resume selection and lets a later scheduled/spot-area start replace the
+        previous job type naturally.
+        """
+        if self.job_type == job_type:
+            self.job_type = None
 
 
 _RECORDS: WeakKeyDictionary[EventBus, MowerStateRecord] = WeakKeyDictionary()
