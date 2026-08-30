@@ -1,6 +1,7 @@
 mow_area:
   target:
-    device:
+    entity:
+      domain: lawn_mower
       integration: ecovacs_mower
   fields:
     area_ids:
