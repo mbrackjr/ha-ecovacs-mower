@@ -7,6 +7,9 @@ from deebot_client.hardware import _DEVICES, get_static_device_info
 from custom_components.ecovacs_mower.deebot_patch.hardware import patch_device_info
 from custom_components.ecovacs_mower.deebot_patch.zonal import (
     MowArea,
+    ResumeSpotArea,
+    _ResumeSpotAreaNonV2,
+    _ResumeSpotAreaV2,
     _ZoneCleanNonV2,
     _ZoneCleanV2,
 )
@@ -40,6 +43,28 @@ def test_v2_spot_area_payload_has_the_same_nested_shape() -> None:
         "act": "start",
         "content": {"type": "spotArea", "value": "7"},
     }
+
+
+def test_spot_area_resume_uses_the_saved_job() -> None:
+    command = _ResumeSpotAreaNonV2()
+    assert command.NAME == "clean"
+    assert command._args == {
+        "act": "resume",
+        "content": {"type": "spotArea"},
+    }
+
+
+def test_v2_spot_area_resume_uses_the_saved_job() -> None:
+    command = _ResumeSpotAreaV2()
+    assert command.NAME == "clean_V2"
+    assert command._args == {
+        "act": "resume",
+        "content": {"type": "spotArea"},
+    }
+
+
+def test_resume_spot_area_is_a_clean_command() -> None:
+    assert isinstance(ResumeSpotArea(), Clean)
 
 
 def test_mow_area_requires_spot_area_mode() -> None:

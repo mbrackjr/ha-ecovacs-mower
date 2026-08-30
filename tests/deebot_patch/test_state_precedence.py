@@ -29,6 +29,7 @@ def test_registering_returns_a_record_that_starts_undocked() -> None:
     record = register(_bus())
     assert record.docked is False
     assert record.suppressed is None
+    assert record.job_type is None
 
 
 def test_the_same_bus_gets_the_same_record() -> None:
@@ -55,6 +56,18 @@ def test_dock_sets_and_move_clears_including_the_suppressed_state() -> None:
     # Forgotten, not kept: once the mower is moving the last StateEvent is the
     # honest answer again, and a stale PAUSED would outlive the plan it named.
     assert record.suppressed is None
+
+
+def test_job_type_is_replaced_and_cleared() -> None:
+    record = MowerStateRecord()
+    record.start_job("spotarea")
+    assert record.job_type == "spotarea"
+
+    record.start_job("schedule")
+    assert record.job_type == "schedule"
+
+    record.stop_job()
+    assert record.job_type is None
 
 
 def test_the_entry_is_dropped_when_its_bus_is_collected() -> None:

@@ -20,6 +20,9 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
 from .controller import EcovacsController
+from .deebot_patch.job_type import MowerJobTypeEvent
+from .deebot_patch.state_precedence import record_for
+from .deebot_patch.zonal import ResumeSpotArea
 from .entity import EcovacsEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -88,9 +91,24 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
             self._attr_activity = activity
             self.async_write_ha_state()
 
+        async def on_job_type(event: MowerJobTypeEvent) -> None:
+            """Remember the active job type reported by the mower itself.
+
+            This is deliberately driven by the mower's wire event rather than
+            by ``mow_area``. A spot-area job started in the Ecovacs app therefore
+            gets the same pause/resume behavior as one started from HA.
+            """
+            if (record := record_for(self._capability.state.event)) is None:
+                return
+            if event.phase == "start":
+                record.start_job(event.job_type)
+            elif event.phase == "stop":
+                record.stop_job()
+
         # Subscribing is also the startup check: the bus hands over the last
         # event if it has one and otherwise refreshes for the first subscriber.
         self._subscribe(self._capability.state.event, on_status)
+        self._subscribe(MowerJobTypeEvent, on_job_type)
 
     @override
     async def async_update(self) -> None:
@@ -113,15 +131,34 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
         self._device.events.request_refresh(StatsEvent)
 
     async def _clean_command(self, action: CleanAction) -> None:
+        """Send a clean action, using the active job type when resuming."""
         if action is CleanAction.START:
             # A command sent from HA never produces a StateEvent on its own —
             # only a confirmed push does — so the controller's own tick would
             # not restart on a dropped leaving-the-dock push without this
             # nudge.
             self._controller.start_polling(self._device)
-        await self._execute_command(
-            self._capability.clean.action.command(action)
-        )
+
+        event_bus = self._capability.state.event
+        record = record_for(event_bus)
+        state = record.suppressed if record is not None else None
+        if state is None and (last := event_bus.get_last_event(StateEvent)):
+            state = last.state
+
+        if (
+            action is CleanAction.START
+            and state is State.PAUSED
+            and record is not None
+            and record.job_type == "spotarea"
+        ):
+            # The mower retains the selected zones while paused. A plain START
+            # would begin a new generic clean; the protocol uses resume with
+            # type=spotArea to continue the saved job.
+            command = ResumeSpotArea()
+        else:
+            command = self._capability.clean.action.command(action)
+
+        await self._execute_command(command)
 
     @override
     async def async_start_mowing(self) -> None:

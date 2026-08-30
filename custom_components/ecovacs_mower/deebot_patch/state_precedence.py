@@ -27,10 +27,11 @@ if TYPE_CHECKING:
 
 @dataclass
 class MowerStateRecord:
-    """What this device is doing, as far as the precedence rule is concerned."""
+    """What this device is doing, as far as the precedence rules are concerned."""
 
     docked: bool = False
     suppressed: State | None = None
+    job_type: str | None = None
 
     def dock(self) -> None:
         """The mower is on its charger."""
@@ -45,6 +46,14 @@ class MowerStateRecord:
         """
         self.docked = False
         self.suppressed = None
+
+    def start_job(self, job_type: str) -> None:
+        """Remember the job type reported by the mower."""
+        self.job_type = job_type
+
+    def stop_job(self) -> None:
+        """Forget the completed or stopped job."""
+        self.job_type = None
 
 
 _RECORDS: WeakKeyDictionary[EventBus, MowerStateRecord] = WeakKeyDictionary()
