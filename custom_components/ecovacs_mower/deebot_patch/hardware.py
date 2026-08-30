@@ -1,8 +1,8 @@
 """Seeds deebot-client's device cache with corrected capabilities.
 
 ``get_static_device_info()`` reads the ``_DEVICES`` cache before importing the
-device module. By letting the library build its own definition, swapping out
-the broken parts and putting the result back, we avoid monkeypatching any
+device module. By letting the library build its own definition, swapping out the
+broken parts and putting the result back, we avoid monkeypatching any
 function — we use the same mechanism the library itself uses.
 """
 
@@ -71,7 +71,7 @@ async def patch_device_info(class_: str) -> None:
     * ``clean.action.command``: ``CleanV2`` publishes on ``clean_V2``, which
       GOAT firmware ignores. Swapped for ``CleanMower`` on ``clean``.
     * ``clean.action.area``: expose the verified GOAT ``spotArea`` area-clean
-      command. The area settings themselves remain mower-side.
+      command when the library does not already provide an area command.
     * ``state``: the clean-info answer is a constant ``idle`` regardless of
       what the mower is actually doing (issue #48), and the library ran the
       charge and clean-info answers concurrently in one ``TaskGroup`` — a
@@ -120,7 +120,11 @@ async def patch_device_info(class_: str) -> None:
             action=replace(
                 capabilities.clean.action,
                 command=CleanMower,
-                area=MowArea,
+                area=(
+                    capabilities.clean.action.area
+                    if capabilities.clean.action.area is not None
+                    else MowArea
+                ),
             ),
         ),
         state=CapabilityEvent(StateEvent, [MowerStateRefresh()]),
