@@ -30,6 +30,7 @@ from .messages import (
     MowerRainDelayEvent,
     MowerStatsEvent,
 )
+from .zonal import MowArea
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +70,8 @@ async def patch_device_info(class_: str) -> None:
 
     * ``clean.action.command``: ``CleanV2`` publishes on ``clean_V2``, which
       GOAT firmware ignores. Swapped for ``CleanMower`` on ``clean``.
+    * ``clean.action.area``: expose the verified GOAT ``spotArea`` area-clean
+      command. The area settings themselves remain mower-side.
     * ``state``: the clean-info answer is a constant ``idle`` regardless of
       what the mower is actually doing (issue #48), and the library ran the
       charge and clean-info answers concurrently in one ``TaskGroup`` — a
@@ -114,7 +117,11 @@ async def patch_device_info(class_: str) -> None:
         capabilities,
         clean=replace(
             capabilities.clean,
-            action=replace(capabilities.clean.action, command=CleanMower),
+            action=replace(
+                capabilities.clean.action,
+                command=CleanMower,
+                area=MowArea,
+            ),
         ),
         state=CapabilityEvent(StateEvent, [MowerStateRefresh()]),
         # Only stats.clean is replaced; total and report are the library's

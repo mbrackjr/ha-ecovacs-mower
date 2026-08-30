@@ -9,6 +9,7 @@ from homeassistant.helpers import device_registry as dr
 
 from .const import CONF_CREDENTIALS, DOMAIN
 from .controller import EcovacsController, async_remove_map_store
+from .service import async_setup_service
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -22,6 +23,12 @@ PLATFORMS = [
 ]
 
 type EcovacsMowerConfigEntry = ConfigEntry[EcovacsController]
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the integration domain."""
+    await async_setup_service(hass)
+    return True
 
 
 async def async_setup_entry(
