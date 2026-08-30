@@ -20,7 +20,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
 from .controller import EcovacsController
-from .deebot_patch.messages import MowerJobEdgeEvent
+from .deebot_patch.job_type import MowerJobTypeEvent
 from .deebot_patch.state_precedence import record_for
 from .deebot_patch.zonal import ResumeSpotArea
 from .entity import EcovacsEntity
@@ -91,25 +91,24 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
             self._attr_activity = activity
             self.async_write_ha_state()
 
-        async def on_job_edge(event: MowerJobEdgeEvent) -> None:
+        async def on_job_type(event: MowerJobTypeEvent) -> None:
             """Remember the latest mowing job reported by the mower.
 
-            Job-edge messages are more specific than the generic state events:
-            they distinguish scheduled and spot-area mowing even when both are
-            temporarily reported as ``IDLE`` or ``PAUSED``. This also covers a
-            job started from the Ecovacs app, because the edge is emitted by the
-            mower rather than by the HA ``mow_area`` service.
+            These events are emitted only from the GOAT's schedule/spot-area
+            mowing messages, so generic ``IDLE``/``PAUSED`` state transitions
+            cannot overwrite the job type. A job started in the Ecovacs app is
+            handled the same way as one started through the HA service.
             """
             record = record_for(self._device.events)
             if record is None:
                 return
             if event.phase == "start":
-                record.start_job(_job_type(event))
+                record.start_job(event.job_type)
             elif event.phase == "stop":
-                record.stop_job(_job_type(event))
+                record.stop_job(event.job_type)
 
         self._subscribe(self._capability.state.event, on_status)
-        self._subscribe(MowerJobEdgeEvent, on_job_edge)
+        self._subscribe(MowerJobTypeEvent, on_job_type)
 
     @override
     async def async_update(self) -> None:
@@ -170,10 +169,3 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
     async def async_dock(self) -> None:
         """Send the mower back to the dock."""
         await self._execute_command(self._capability.charge.execute())
-
-
-def _job_type(event: MowerJobEdgeEvent) -> str:
-    """Map the mower's job-edge event to the resume protocol's job type."""
-    if "spotarea" in event.__class__.__name__.lower():
-        return "spotarea"
-    return "schedule"
