@@ -76,6 +76,47 @@ class _ZoneCleanV2(CleanV2):
         }
 
 
+class _ResumeSpotAreaNonV2(Clean):
+    """Resume the mower's saved spot-area job on the ``clean`` topic."""
+
+    def __init__(self) -> None:
+        super().__init__(CleanAction.RESUME)
+
+    async def _execute(
+        self,
+        authenticator: Authenticator,
+        device_info: ApiDeviceInfo,
+        event_bus: EventBus,
+    ) -> tuple[HandlingResult, dict[str, Any]]:
+        """Execute without Clean rewriting the resume action."""
+        return await Command._execute(self, authenticator, device_info, event_bus)
+
+    def _get_args(self, action: CleanAction) -> dict[str, Any]:
+        # The mower retains the selected zones and their parameters. Resume
+        # identifies that stored job by type; sending the area IDs again is
+        # neither necessary nor equivalent to resume.
+        return {"act": action.value, "content": {"type": _TYPE_SPOT_AREA}}
+
+
+class _ResumeSpotAreaV2(CleanV2):
+    """Resume the mower's saved spot-area job on the ``clean_V2`` topic."""
+
+    def __init__(self) -> None:
+        super().__init__(CleanAction.RESUME)
+
+    async def _execute(
+        self,
+        authenticator: Authenticator,
+        device_info: ApiDeviceInfo,
+        event_bus: EventBus,
+    ) -> tuple[HandlingResult, dict[str, Any]]:
+        """Execute without Clean rewriting the resume action."""
+        return await Command._execute(self, authenticator, device_info, event_bus)
+
+    def _get_args(self, action: CleanAction) -> dict[str, Any]:
+        return {"act": action.value, "content": {"type": _TYPE_SPOT_AREA}}
+
+
 class MowArea(_AdaptiveFamily, Clean):
     """Mow saved area IDs using the GOAT ``spotArea`` command.
 
@@ -114,5 +155,42 @@ class MowArea(_AdaptiveFamily, Clean):
         self._delegates = {
             Family.NON_V2: _ZoneCleanNonV2(self._area),
             Family.V2: _ZoneCleanV2(self._area),
+        }
+        return await super()._execute(authenticator, device_info, event_bus)
+
+
+class ResumeSpotArea(_AdaptiveFamily, Clean):
+    """Resume an already active ``spotArea`` job.
+
+    The mower keeps the selected zones and their mowing parameters while a
+    job is paused. Unlike ``MowArea``, this command therefore carries no area
+    IDs: the wire protocol uses ``resume`` with ``type=spotArea`` to identify
+    the saved job.
+    """
+
+    def __init__(self) -> None:
+        """Initialize a spot-area resume command."""
+        self._delegates: dict[Family, Command] = {}
+        super().__init__(CleanAction.RESUME)
+
+    def _get_args(self, action: CleanAction) -> dict[str, Any]:
+        # Keep command equality/repr meaningful without treating this wrapper's
+        # inert args as a wire payload; the delegates below build that payload.
+        return {"act": action.value, "content": {"type": _TYPE_SPOT_AREA}}
+
+    def _delegate(self, family: Family) -> Command:
+        """Return the command for the selected wire family."""
+        return self._delegates[family]
+
+    async def _execute(
+        self,
+        authenticator: Authenticator,
+        device_info: ApiDeviceInfo,
+        event_bus: EventBus,
+    ) -> tuple[HandlingResult, dict[str, Any]]:
+        """Build both resume variants and let the adaptive family choose."""
+        self._delegates = {
+            Family.NON_V2: _ResumeSpotAreaNonV2(),
+            Family.V2: _ResumeSpotAreaV2(),
         }
         return await super()._execute(authenticator, device_info, event_bus)

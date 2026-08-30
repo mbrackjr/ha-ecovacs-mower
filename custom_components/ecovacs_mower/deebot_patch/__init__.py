@@ -20,6 +20,12 @@ from .authentication import AccountAuthenticator
 from .commands import CleanMower, GetCleanInfoMower, MowerStateRefresh, has_family
 from .families import attempted_family_name
 from .hardware import SUPPORTED_CLASSES, patch_device_info
+from .job_type import (
+    OnMowScheduleStartType,
+    OnMowScheduleStopType,
+    OnMowSpotAreaStartType,
+    OnMowSpotAreaStopType,
+)
 from .map_messages import (
     OnArI,
     OnMapTrace,
@@ -92,6 +98,10 @@ def apply() -> None:
         OnMowScheduleStop,
         OnMowSpotAreaStart,
         OnMowSpotAreaStop,
+        OnMowScheduleStartType,
+        OnMowScheduleStopType,
+        OnMowSpotAreaStartType,
+        OnMowSpotAreaStopType,
         OnPos,
         OnProtectState,
         OnRainDelay,
