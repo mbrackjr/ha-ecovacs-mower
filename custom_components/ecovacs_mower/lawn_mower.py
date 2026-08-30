@@ -98,7 +98,10 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
             by ``mow_area``. A spot-area job started in the Ecovacs app therefore
             gets the same pause/resume behavior as one started from HA.
             """
-            if (record := record_for(self._capability.state.event)) is None:
+            # The state capability exposes the event *type*; the EventBus lives
+            # on the device. The record is per bus, so look it up from the device
+            # rather than from StateEvent itself.
+            if (record := record_for(self._device.events)) is None:
                 return
             if event.phase == "start":
                 record.start_job(event.job_type)
