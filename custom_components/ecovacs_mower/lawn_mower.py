@@ -20,7 +20,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
 from .controller import EcovacsController
-from .deebot_patch.job_type import MowerJobTypeEvent
+from .deebot_patch.messages import MowerJobEdgeEvent
 from .deebot_patch.state_precedence import record_for
 from .deebot_patch.zonal import ResumeSpotArea
 from .entity import EcovacsEntity
@@ -91,27 +91,25 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
             self._attr_activity = activity
             self.async_write_ha_state()
 
-        async def on_job_type(event: MowerJobTypeEvent) -> None:
-            """Remember the active job type reported by the mower itself.
+        async def on_job_edge(event: MowerJobEdgeEvent) -> None:
+            """Remember the latest mowing job reported by the mower.
 
-            This is deliberately driven by the mower's wire event rather than
-            by ``mow_area``. A spot-area job started in the Ecovacs app therefore
-            gets the same pause/resume behavior as one started from HA.
+            Job-edge messages are more specific than the generic state events:
+            they distinguish scheduled and spot-area mowing even when both are
+            temporarily reported as ``IDLE`` or ``PAUSED``. This also covers a
+            job started from the Ecovacs app, because the edge is emitted by the
+            mower rather than by the HA ``mow_area`` service.
             """
-            # The state capability exposes the event *type*; the EventBus lives
-            # on the device. The record is per bus, so look it up from the device
-            # rather than from StateEvent itself.
-            if (record := record_for(self._device.events)) is None:
+            record = record_for(self._device.events)
+            if record is None:
                 return
             if event.phase == "start":
-                record.start_job(event.job_type)
+                record.start_job(_job_type(event))
             elif event.phase == "stop":
-                record.stop_job()
+                record.stop_job(_job_type(event))
 
-        # Subscribing is also the startup check: the bus hands over the last
-        # event if it has one and otherwise refreshes for the first subscriber.
         self._subscribe(self._capability.state.event, on_status)
-        self._subscribe(MowerJobTypeEvent, on_job_type)
+        self._subscribe(MowerJobEdgeEvent, on_job_edge)
 
     @override
     async def async_update(self) -> None:
@@ -144,21 +142,14 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
 
         event_bus = self._device.events
         record = record_for(event_bus)
-        state = record.suppressed if record is not None else None
-        if state is None and (last := event_bus.get_last_event(StateEvent)):
-            state = last.state
-
         if (
             action is CleanAction.START
-            and state in (State.IDLE, State.PAUSED)
             and record is not None
             and record.job_type == "spotarea"
         ):
-            # Both IDLE and PAUSED are rendered as PAUSED by this entity. Using
-            # only State.PAUSED here would miss GOAT firmware that reports the
-            # paused state as IDLE and fall back to a generic START.
-            # The mower retains the selected zones while paused; the protocol
-            # uses resume with type=spotArea to continue the saved job.
+            # The mower retains the selected zones while paused. A plain START
+            # would begin a new generic clean; the protocol uses resume with
+            # type=spotArea to continue the saved job.
             command = ResumeSpotArea()
         else:
             command = self._capability.clean.action.command(action)
@@ -179,3 +170,10 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
     async def async_dock(self) -> None:
         """Send the mower back to the dock."""
         await self._execute_command(self._capability.charge.execute())
+
+
+def _job_type(event: MowerJobEdgeEvent) -> str:
+    """Map the mower's job-edge event to the resume protocol's job type."""
+    if "spotarea" in event.__class__.__name__.lower():
+        return "spotarea"
+    return "schedule"
