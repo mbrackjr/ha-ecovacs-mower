@@ -58,15 +58,18 @@ def test_dock_sets_and_move_clears_including_the_suppressed_state() -> None:
     assert record.suppressed is None
 
 
-def test_job_type_is_replaced_and_cleared() -> None:
+def test_job_type_is_replaced_and_only_its_own_stop_clears_it() -> None:
     record = MowerStateRecord()
     record.start_job("spotarea")
     assert record.job_type == "spotarea"
 
+    # A later mowing start is authoritative even if an older stop arrives late.
     record.start_job("schedule")
     assert record.job_type == "schedule"
+    record.stop_job("spotarea")
+    assert record.job_type == "schedule"
 
-    record.stop_job()
+    record.stop_job("schedule")
     assert record.job_type is None
 
 
