@@ -12,6 +12,7 @@ from custom_components.ecovacs_mower.deebot_patch.job_type import (
     OnMowSpotAreaStartType,
     OnMowSpotAreaStopType,
 )
+from custom_components.ecovacs_mower.deebot_patch.messages import MowerJobEdgeEvent
 
 
 def _bus() -> EventBus:
@@ -23,6 +24,7 @@ def test_spot_area_start_preserves_the_existing_handler_and_adds_job_type() -> N
     result = OnMowSpotAreaStartType._handle_body(bus, {"trigger": "app"})
 
     assert result.state is HandlingState.SUCCESS
+    assert bus.get_last_event(MowerJobEdgeEvent).phase == "start"
     assert bus.get_last_event(MowerJobTypeEvent) == MowerJobTypeEvent("start", "spotarea")
 
 
