@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import voluptuous as vol
-from homeassistant.const import ATTR_DEVICE_ID
+from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN
 
@@ -26,11 +27,19 @@ async def async_setup_service(hass: HomeAssistant) -> None:
         return
 
     async def _mow_area(call: ServiceCall) -> None:
-        device_ids = call.data.get(ATTR_DEVICE_ID, [])
-        if len(device_ids) != 1:
-            raise HomeAssistantError("mow_area requires exactly one mower device")
+        entity_ids = call.data.get(ATTR_ENTITY_ID, [])
+        if len(entity_ids) != 1:
+            raise HomeAssistantError("mow_area requires exactly one mower")
 
-        registry_device = dr.async_get(hass).async_get(device_ids[0])
+        entity = er.async_get(hass).async_get(entity_ids[0])
+        if entity is None or entity.domain != "lawn_mower":
+            raise HomeAssistantError("Mower entity was not found")
+
+        device_id = entity.device_id
+        if device_id is None:
+            raise HomeAssistantError("Mower entity has no device")
+
+        registry_device = dr.async_get(hass).async_get(device_id)
         if registry_device is None:
             raise HomeAssistantError("Mower device was not found")
 
