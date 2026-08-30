@@ -129,3 +129,46 @@ async def test_a_dropped_leaving_push_is_still_bounded_by_the_poll() -> None:
     controller.start_polling.reset_mock()
     await mower._clean_command(CleanAction.PAUSE)
     controller.start_polling.assert_not_called()
+
+
+async def test_spot_area_resume_uses_the_mower_reported_job_type() -> None:
+    """Resume spot-area jobs without interpreting the generic mower state."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from deebot_client.models import CleanAction
+
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import register
+    from custom_components.ecovacs_mower.deebot_patch.zonal import ResumeSpotArea
+    from custom_components.ecovacs_mower.lawn_mower import EcovacsMower
+
+    device = MagicMock()
+    device.device_info = {"did": "did"}
+    mower = EcovacsMower(device, MagicMock())
+    mower._execute_command = AsyncMock()
+    register(device.events).start_job("spotarea")
+
+    await mower._clean_command(CleanAction.START)
+
+    command = mower._execute_command.await_args.args[0]
+    assert isinstance(command, ResumeSpotArea)
+
+
+async def test_scheduled_job_keeps_the_normal_start_command() -> None:
+    """A scheduled job does not switch to the spot-area resume command."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from deebot_client.models import CleanAction
+
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import register
+    from custom_components.ecovacs_mower.lawn_mower import EcovacsMower
+
+    device = MagicMock()
+    device.device_info = {"did": "did"}
+    mower = EcovacsMower(device, MagicMock())
+    mower._execute_command = AsyncMock()
+    register(device.events).start_job("schedule")
+
+    await mower._clean_command(CleanAction.START)
+
+    command = mower._execute_command.await_args.args[0]
+    assert command is device.capabilities.clean.action.command.return_value
