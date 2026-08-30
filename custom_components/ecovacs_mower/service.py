@@ -14,7 +14,6 @@ from .const import DOMAIN
 SERVICE_MOW_AREA = "mow_area"
 SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): vol.All(cv.ensure_list, [cv.string]),
         vol.Required("area_ids"): vol.All(cv.ensure_list, [vol.Coerce(int)]),
     }
 )
@@ -26,7 +25,7 @@ async def async_setup_service(hass: HomeAssistant) -> None:
         return
 
     async def _mow_area(call: ServiceCall) -> None:
-        device_ids = call.data[ATTR_DEVICE_ID]
+        device_ids = call.data.get(ATTR_DEVICE_ID, [])
         if len(device_ids) != 1:
             raise HomeAssistantError("mow_area requires exactly one mower device")
 
