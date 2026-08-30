@@ -1,0 +1,11 @@
+mow_area:
+  target:
+    device:
+      integration: ecovacs_mower
+  fields:
+    area_ids:
+      required: true
+      example: "1"
+      selector:
+        text:
+          multiple: true
