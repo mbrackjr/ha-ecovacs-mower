@@ -150,13 +150,15 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
 
         if (
             action is CleanAction.START
-            and state is State.PAUSED
+            and state in (State.IDLE, State.PAUSED)
             and record is not None
             and record.job_type == "spotarea"
         ):
-            # The mower retains the selected zones while paused. A plain START
-            # would begin a new generic clean; the protocol uses resume with
-            # type=spotArea to continue the saved job.
+            # Both IDLE and PAUSED are rendered as PAUSED by this entity. Using
+            # only State.PAUSED here would miss GOAT firmware that reports the
+            # paused state as IDLE and fall back to a generic START.
+            # The mower retains the selected zones while paused; the protocol
+            # uses resume with type=spotArea to continue the saved job.
             command = ResumeSpotArea()
         else:
             command = self._capability.clean.action.command(action)
