@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import voluptuous as vol
+from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.service import async_extract_device_ids
 
 from .const import DOMAIN
 
 SERVICE_MOW_AREA = "mow_area"
 SERVICE_SCHEMA = vol.Schema(
     {
+        vol.Required(ATTR_DEVICE_ID): vol.All(cv.ensure_list, [cv.string]),
         vol.Required("area_ids"): vol.All(cv.ensure_list, [vol.Coerce(int)]),
     }
 )
@@ -25,11 +26,11 @@ async def async_setup_service(hass: HomeAssistant) -> None:
         return
 
     async def _mow_area(call: ServiceCall) -> None:
-        device_ids = async_extract_device_ids(hass, call)
+        device_ids = call.data[ATTR_DEVICE_ID]
         if len(device_ids) != 1:
             raise HomeAssistantError("mow_area requires exactly one mower device")
 
-        registry_device = dr.async_get(hass).async_get(next(iter(device_ids)))
+        registry_device = dr.async_get(hass).async_get(device_ids[0])
         if registry_device is None:
             raise HomeAssistantError("Mower device was not found")
 
