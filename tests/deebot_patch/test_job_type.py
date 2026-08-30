@@ -8,7 +8,9 @@ from deebot_client.message import HandlingState
 from custom_components.ecovacs_mower.deebot_patch.job_type import (
     MowerJobTypeEvent,
     OnMowScheduleStartType,
+    OnMowScheduleStopType,
     OnMowSpotAreaStartType,
+    OnMowSpotAreaStopType,
 )
 
 
@@ -30,6 +32,22 @@ def test_schedule_start_reports_a_different_job_type() -> None:
 
     assert result.state is HandlingState.SUCCESS
     assert bus.get_last_event(MowerJobTypeEvent) == MowerJobTypeEvent("start", "schedule")
+
+
+def test_spot_area_stop_reports_the_same_job_type() -> None:
+    bus = _bus()
+    result = OnMowSpotAreaStopType._handle_body(bus, {"trigger": "workComplete"})
+
+    assert result.state is HandlingState.SUCCESS
+    assert bus.get_last_event(MowerJobTypeEvent) == MowerJobTypeEvent("stop", "spotarea")
+
+
+def test_schedule_stop_reports_the_same_job_type() -> None:
+    bus = _bus()
+    result = OnMowScheduleStopType._handle_body(bus, {"trigger": "app"})
+
+    assert result.state is HandlingState.SUCCESS
+    assert bus.get_last_event(MowerJobTypeEvent) == MowerJobTypeEvent("stop", "schedule")
 
 
 def test_missing_trigger_does_not_create_job_type_state() -> None:
