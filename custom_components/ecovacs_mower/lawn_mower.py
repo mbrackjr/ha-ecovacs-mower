@@ -139,7 +139,7 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
             # nudge.
             self._controller.start_polling(self._device)
 
-        event_bus = self._capability.state.event
+        event_bus = self._device.events
         record = record_for(event_bus)
         state = record.suppressed if record is not None else None
         if state is None and (last := event_bus.get_last_event(StateEvent)):
