@@ -131,6 +131,7 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
         if area is not MowArea:
             raise HomeAssistantError("This mower does not support zone mowing")
 
+        self._controller.start_polling(self._device)
         await self._execute_command(area("spotArea", area_ids, 1))
 
     @override
