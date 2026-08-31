@@ -134,21 +134,26 @@ async def test_a_dropped_leaving_push_is_still_bounded_by_the_poll() -> None:
 async def test_mow_area_dispatches_through_entity_command() -> None:
     """A supported mower builds MowArea and uses the entity command wrapper."""
     from types import SimpleNamespace
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
 
     from custom_components.ecovacs_mower.deebot_patch.zonal import MowArea
     from custom_components.ecovacs_mower.lawn_mower import EcovacsMower
 
     execute = AsyncMock()
+    controller = MagicMock()
+    device = MagicMock()
     mower = SimpleNamespace(
         _capability=SimpleNamespace(
             clean=SimpleNamespace(action=SimpleNamespace(area=MowArea))
         ),
+        _controller=controller,
+        _device=device,
         _execute_command=execute,
     )
 
     await EcovacsMower.async_mow_area(mower, [1, 3])
 
+    controller.start_polling.assert_called_once_with(device)
     execute.assert_awaited_once()
     command = execute.await_args.args[0]
     assert command == MowArea("spotArea", [1, 3])
