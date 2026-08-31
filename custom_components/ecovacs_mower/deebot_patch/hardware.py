@@ -1,8 +1,8 @@
 """Seeds deebot-client's device cache with corrected capabilities.
 
 ``get_static_device_info()`` reads the ``_DEVICES`` cache before importing the
-device module. By letting the library build its own definition, swapping out
-the broken parts and putting the result back, we avoid monkeypatching any
+device module. By letting the library build its own definition, swapping out the
+broken parts and putting the result back, we avoid monkeypatching any
 function — we use the same mechanism the library itself uses.
 """
 
@@ -30,6 +30,7 @@ from .messages import (
     MowerRainDelayEvent,
     MowerStatsEvent,
 )
+from .zonal import MowArea
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +62,10 @@ _LOGGER = logging.getLogger(__name__)
 #            Capabilities"), so the O800 RTK's patch applies unchanged.
 SUPPORTED_CLASSES = ("2i0fns", "9bts2s", "2px96q", "77atlz", "e4gqia", "xmp9ds")
 
+# ``spotArea`` has only been verified on the A1600 LiDAR Pro. Other supported
+# classes may already expose a library area command, so leave those untouched.
+ZONE_AREA_CLASSES = ("e4gqia",)
+
 
 async def patch_device_info(class_: str) -> None:
     """Replace the cached device definition with one where the mow bugs are fixed.
@@ -69,6 +74,9 @@ async def patch_device_info(class_: str) -> None:
 
     * ``clean.action.command``: ``CleanV2`` publishes on ``clean_V2``, which
       GOAT firmware ignores. Swapped for ``CleanMower`` on ``clean``.
+    * ``clean.action.area``: expose the verified GOAT ``spotArea`` area-clean
+      command for the A1600 LiDAR Pro. Existing library area commands are
+      preserved for other classes.
     * ``state``: the clean-info answer is a constant ``idle`` regardless of
       what the mower is actually doing (issue #48), and the library ran the
       charge and clean-info answers concurrently in one ``TaskGroup`` — a
@@ -114,7 +122,15 @@ async def patch_device_info(class_: str) -> None:
         capabilities,
         clean=replace(
             capabilities.clean,
-            action=replace(capabilities.clean.action, command=CleanMower),
+            action=replace(
+                capabilities.clean.action,
+                command=CleanMower,
+                area=(
+                    MowArea
+                    if class_ in ZONE_AREA_CLASSES
+                    else capabilities.clean.action.area
+                ),
+            ),
         ),
         state=CapabilityEvent(StateEvent, [MowerStateRefresh()]),
         # Only stats.clean is replaced; total and report are the library's

@@ -129,3 +129,50 @@ async def test_a_dropped_leaving_push_is_still_bounded_by_the_poll() -> None:
     controller.start_polling.reset_mock()
     await mower._clean_command(CleanAction.PAUSE)
     controller.start_polling.assert_not_called()
+
+
+async def test_mow_area_dispatches_through_entity_command() -> None:
+    """A supported mower builds MowArea and uses the entity command wrapper."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from custom_components.ecovacs_mower.deebot_patch.zonal import MowArea
+    from custom_components.ecovacs_mower.lawn_mower import EcovacsMower
+
+    execute = AsyncMock()
+    mower = SimpleNamespace(
+        _capability=SimpleNamespace(
+            clean=SimpleNamespace(action=SimpleNamespace(area=MowArea))
+        ),
+        _execute_command=execute,
+    )
+
+    await EcovacsMower.async_mow_area(mower, [1, 3])
+
+    execute.assert_awaited_once()
+    command = execute.await_args.args[0]
+    assert command == MowArea("spotArea", [1, 3])
+
+
+async def test_mow_area_rejects_mowers_without_spot_area() -> None:
+    """A mower with another area command is not advertised as zone capable."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.ecovacs_mower.lawn_mower import EcovacsMower
+
+    mower = SimpleNamespace(
+        _capability=SimpleNamespace(
+            clean=SimpleNamespace(action=SimpleNamespace(area=MagicMock()))
+        ),
+        _execute_command=AsyncMock(),
+    )
+
+    with pytest.raises(HomeAssistantError, match="does not support zone mowing"):
+        await EcovacsMower.async_mow_area(mower, [1])
+
+    mower._capability.clean.action.area = None
+    with pytest.raises(HomeAssistantError, match="does not support zone mowing"):
+        await EcovacsMower.async_mow_area(mower, [1])

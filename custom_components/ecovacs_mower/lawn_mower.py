@@ -16,10 +16,12 @@ from homeassistant.components.lawn_mower import (
     LawnMowerEntityFeature,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
 from .controller import EcovacsController
+from .deebot_patch.zonal import MowArea
 from .entity import EcovacsEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -122,6 +124,14 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
         await self._execute_command(
             self._capability.clean.action.command(action)
         )
+
+    async def async_mow_area(self, area_ids: list[int]) -> None:
+        """Start mowing the selected saved areas."""
+        area = self._capability.clean.action.area
+        if area is not MowArea:
+            raise HomeAssistantError("This mower does not support zone mowing")
+
+        await self._execute_command(area("spotArea", area_ids, 1))
 
     @override
     async def async_start_mowing(self) -> None:

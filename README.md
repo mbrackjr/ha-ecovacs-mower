@@ -178,9 +178,36 @@ plus one per UWB beacon on the models that use them:
 | `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped — see below) |
 | `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, and `onMapTrace` on firmware 1.17); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
 
-Not included yet: **RTK diagnostics** (position and satellite data) and
-zone control. RTK is planned for the next release; the other has no
-committed date.
+Not included yet: **RTK diagnostics** (position and satellite data). RTK is
+planned for the next release.
+
+### Zone-specific mowing
+
+The `ecovacs_mower.mow_area` service starts a mowing job for one or more
+specified zone IDs using the mower's `spotArea` command.
+
+The service requires a mower entity as its target and accepts one or more
+integer `area_ids` between `1` and `999`:
+
+```yaml
+action: ecovacs_mower.mow_area
+target:
+  entity_id: lawn_mower.my_goat
+data:
+  area_ids:
+    - 1
+    - 3
+```
+Multiple zones can be supplied in a single call. The service is stateless:
+it sends the requested zones directly to the targeted mower and does not
+attempt to determine whether the specified zones actually exist on the
+mower.
+
+The same service can also be used from Home Assistant's UI, where the mower
+entity and one or more zone IDs can be selected.
+
+The zone IDs are mower-specific. A value being within the accepted 1..999
+range does not imply that the mower has a zone with that ID.
 
 ### When a run stops because of rain
 

@@ -7,9 +7,51 @@ requires_ha. The source of truth is CI on ubuntu-latest.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+import voluptuous as vol
+
 from . import requires_ha
 
 pytestmark = requires_ha
+
+
+async def test_async_setup_registers_mow_area_entity_service() -> None:
+    """Register the action before any config entry is loaded."""
+    from custom_components.ecovacs_mower import async_setup
+
+    hass = MagicMock()
+    with patch(
+        "custom_components.ecovacs_mower.service.async_register_platform_entity_service"
+    ) as register:
+        assert await async_setup(hass, {})
+
+    register.assert_called_once()
+    kwargs = register.call_args.kwargs
+    assert kwargs["entity_domain"] == "lawn_mower"
+    assert kwargs["func"] == "async_mow_area"
+
+
+async def test_mow_area_service_validates_area_ids(hass) -> None:
+    """Invalid area IDs fail at the service boundary."""
+    from custom_components.ecovacs_mower import async_setup
+
+    await async_setup(hass, {})
+
+    with pytest.raises(vol.MultipleInvalid):
+        await hass.services.async_call(
+            "ecovacs_mower",
+            "mow_area",
+            {"entity_id": "lawn_mower.goat"},
+            blocking=True,
+        )
+
+    with pytest.raises(vol.MultipleInvalid):
+        await hass.services.async_call(
+            "ecovacs_mower",
+            "mow_area",
+            {"entity_id": "lawn_mower.goat", "area_ids": [0]},
+            blocking=True,
+        )
 
 
 async def test_async_remove_entry_removes_stores_for_every_mower_device() -> None:
