@@ -6,11 +6,8 @@ mow_area:
   fields:
     area_ids:
       required: true
-      example: 1
+      example: "1"
       selector:
-        number:
-          min: 1
-          max: 999
-          step: 1
-          mode: box
+        text:
           multiple: true
+          type: number
