@@ -18,7 +18,7 @@ from deebot_client.commands.json.clean import Clean, CleanV2
 from deebot_client.message import HandlingResult
 from deebot_client.models import CleanAction
 
-from .commands import _AdaptiveFamily
+from .commands import _AdaptiveFamily, _NoActionRewrite
 from .families import Family
 
 if TYPE_CHECKING:
@@ -30,50 +30,26 @@ if TYPE_CHECKING:
 _TYPE_SPOT_AREA = "spotArea"
 
 
-class _ZoneCleanNonV2(Clean):
+class _ZoneClean(_NoActionRewrite):
+    """Shared spot-area payload and action-rewrite bypass."""
+
+    def __init__(self, area: list[int | float]) -> None:
+        self._value = ",".join(str(value) for value in area)
+        super().__init__(CleanAction.START)
+
+    def _get_args(self, action: CleanAction) -> dict[str, Any]:
+        return {
+            "act": action.value,
+            "content": {"type": _TYPE_SPOT_AREA, "value": self._value},
+        }
+
+
+class _ZoneCleanNonV2(_ZoneClean, Clean):
     """Send the spot-area payload on the ``clean`` topic."""
 
-    def __init__(self, area: list[int | float]) -> None:
-        self._value = ",".join(str(value) for value in area)
-        super().__init__(CleanAction.START)
 
-    async def _execute(
-        self,
-        authenticator: Authenticator,
-        device_info: ApiDeviceInfo,
-        event_bus: EventBus,
-    ) -> tuple[HandlingResult, dict[str, Any]]:
-        """Execute without Clean rewriting the requested action."""
-        return await Command._execute(self, authenticator, device_info, event_bus)
-
-    def _get_args(self, action: CleanAction) -> dict[str, Any]:
-        return {
-            "act": action.value,
-            "content": {"type": _TYPE_SPOT_AREA, "value": self._value},
-        }
-
-
-class _ZoneCleanV2(CleanV2):
+class _ZoneCleanV2(_ZoneClean, CleanV2):
     """Send the spot-area payload on the ``clean_V2`` topic."""
-
-    def __init__(self, area: list[int | float]) -> None:
-        self._value = ",".join(str(value) for value in area)
-        super().__init__(CleanAction.START)
-
-    async def _execute(
-        self,
-        authenticator: Authenticator,
-        device_info: ApiDeviceInfo,
-        event_bus: EventBus,
-    ) -> tuple[HandlingResult, dict[str, Any]]:
-        """Execute without Clean rewriting the requested action."""
-        return await Command._execute(self, authenticator, device_info, event_bus)
-
-    def _get_args(self, action: CleanAction) -> dict[str, Any]:
-        return {
-            "act": action.value,
-            "content": {"type": _TYPE_SPOT_AREA, "value": self._value},
-        }
 
 
 class MowArea(_AdaptiveFamily, Clean):
