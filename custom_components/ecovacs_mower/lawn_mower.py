@@ -8,7 +8,7 @@ from typing import override
 from deebot_client.capabilities import Capabilities, DeviceType
 from deebot_client.device import Device
 from deebot_client.events import StateEvent, StatsEvent
-from deebot_client.models import CleanAction, State
+from deebot_client.models import CleanAction, CleanMode, State
 from homeassistant.components.lawn_mower import (
     LawnMowerActivity,
     LawnMowerEntity,
@@ -132,7 +132,7 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
             raise HomeAssistantError("This mower does not support zone mowing")
 
         self._controller.start_polling(self._device)
-        await self._execute_command(area("spotArea", area_ids, 1))
+        await self._execute_command(area(CleanMode.SPOT_AREA, area_ids, 1))
 
     @override
     async def async_start_mowing(self) -> None:
