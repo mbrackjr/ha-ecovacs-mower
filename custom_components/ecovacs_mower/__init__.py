@@ -27,8 +27,14 @@ type EcovacsMowerConfigEntry = ConfigEntry[EcovacsController]
 
 
 def _valid_area_id(value: object) -> int:
-    """Validate an area ID without coercing its type."""
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 999:
+    """Validate an area ID, accepting the string form produced by HA's text selector."""
+    if isinstance(value, bool):
+        raise vol.Invalid("area ID must be an integer between 1 and 999")
+    if isinstance(value, str):
+        if not value.isdecimal():
+            raise vol.Invalid("area ID must be an integer between 1 and 999")
+        value = int(value)
+    if not isinstance(value, int) or not 1 <= value <= 999:
         raise vol.Invalid("area ID must be an integer between 1 and 999")
     return value
 
