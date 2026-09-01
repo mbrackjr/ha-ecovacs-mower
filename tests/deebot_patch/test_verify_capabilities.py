@@ -2,7 +2,7 @@
 
 import pytest
 
-from . import requires_ha
+from .. import requires_ha
 
 pytestmark = requires_ha
 
@@ -63,3 +63,4 @@ async def test_zone_device_receives_mow_area() -> None:
 
     assert zone.capabilities.clean.action.area is MowArea
     assert non_zone.capabilities.clean.action.area is not MowArea
+
