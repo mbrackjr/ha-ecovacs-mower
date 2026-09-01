@@ -37,15 +37,12 @@ async def test_mow_area_service_reaches_registered_entity(hass) -> None:
 
     from custom_components.ecovacs_mower import async_setup
 
-    async def request_call(coro):
-        return await coro
-
     entity = MagicMock()
     entity.available = True
     entity.entity_id = "lawn_mower.goat"
     entity.should_poll = False
-    entity.async_mow_area = AsyncMock()
-    entity.async_request_call = AsyncMock(side_effect=request_call)
+    entity.async_mow_area = MagicMock()
+    entity.async_request_call = AsyncMock()
     entity.async_set_context = MagicMock()
 
     hass.data.setdefault(DATA_DOMAIN_PLATFORM_ENTITIES, {})[
@@ -60,7 +57,7 @@ async def test_mow_area_service_reaches_registered_entity(hass) -> None:
         blocking=True,
     )
 
-    entity.async_mow_area.assert_awaited_once_with([1, 3])
+    entity.async_mow_area.assert_called_once_with(area_ids=[1, 3])
 
 
 async def test_mow_area_service_validates_area_ids(hass) -> None:
