@@ -155,7 +155,7 @@
   },
   "services": {
     "mow_area": {
-      "default": "mdi:map-marker-path"
+      "service": "mdi:map-marker-path"
     }
   }
 }
