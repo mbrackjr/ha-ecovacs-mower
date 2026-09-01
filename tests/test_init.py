@@ -33,18 +33,24 @@ async def test_async_setup_registers_mow_area_entity_service() -> None:
 
 async def test_mow_area_service_reaches_registered_entity(hass) -> None:
     """A valid service call reaches the registered lawn-mower entity method."""
+    from homeassistant.helpers.entity import Entity
     from homeassistant.helpers.entity_platform import DATA_DOMAIN_PLATFORM_ENTITIES
 
     from custom_components.ecovacs_mower import async_setup
 
-    entity = MagicMock()
-    entity.available = True
-    entity.entity_id = "lawn_mower.goat"
-    entity.should_poll = False
-    entity.async_mow_area = MagicMock()
-    entity.async_request_call = AsyncMock()
-    entity.async_set_context = MagicMock()
+    class TestMowerEntity(Entity):
+        """Minimal real entity for exercising HA's entity-service dispatch."""
 
+        _attr_should_poll = False
+
+        def __init__(self) -> None:
+            self.called_area_ids: list[int] | None = None
+
+        async def async_mow_area(self, area_ids: list[int]) -> None:
+            self.called_area_ids = area_ids
+
+    entity = TestMowerEntity()
+    entity.entity_id = "lawn_mower.goat"
     hass.data.setdefault(DATA_DOMAIN_PLATFORM_ENTITIES, {})[
         ("lawn_mower", "ecovacs_mower")
     ] = {entity.entity_id: entity}
@@ -57,7 +63,7 @@ async def test_mow_area_service_reaches_registered_entity(hass) -> None:
         blocking=True,
     )
 
-    entity.async_mow_area.assert_called_once_with(area_ids=[1, 3])
+    assert entity.called_area_ids == [1, 3]
 
 
 async def test_mow_area_service_validates_area_ids(hass) -> None:
