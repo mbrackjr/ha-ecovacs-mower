@@ -152,5 +152,10 @@
         "default": "mdi:laser-pointer"
       }
     }
+  },
+  "services": {
+    "mow_area": {
+      "default": "mdi:map-marker-path"
+    }
   }
 }
