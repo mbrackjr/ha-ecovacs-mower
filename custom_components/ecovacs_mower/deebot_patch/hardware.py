@@ -70,7 +70,7 @@ ZONE_AREA_CLASSES = ("e4gqia",)
 async def patch_device_info(class_: str) -> None:
     """Replace the cached device definition with one where the mow bugs are fixed.
 
-    Five corrections:
+    Six corrections:
 
     * ``clean.action.command``: ``CleanV2`` publishes on ``clean_V2``, which
       GOAT firmware ignores. Swapped for ``CleanMower`` on ``clean``.
