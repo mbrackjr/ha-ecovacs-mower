@@ -136,6 +136,8 @@ async def test_mow_area_dispatches_through_entity_command() -> None:
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
+    from deebot_client.models import CleanMode
+
     from custom_components.ecovacs_mower.deebot_patch.zonal import MowArea
     from custom_components.ecovacs_mower.lawn_mower import EcovacsMower
 
