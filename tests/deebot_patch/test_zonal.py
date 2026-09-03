@@ -6,6 +6,7 @@ import pytest
 from deebot_client.command import Command
 from deebot_client.commands.json.clean import Clean, CleanV2
 from deebot_client.hardware import _DEVICES, get_static_device_info
+from deebot_client.models import CleanMode
 
 from custom_components.ecovacs_mower.deebot_patch.hardware import patch_device_info
 from custom_components.ecovacs_mower.deebot_patch.zonal import (
