@@ -30,6 +30,10 @@ async def test_async_setup_registers_mow_area_entity_service() -> None:
     assert kwargs["entity_domain"] == "lawn_mower"
     assert kwargs["func"] == "async_mow_area"
 
+    from custom_components.ecovacs_mower.lawn_mower import EcovacsMower
+
+    assert hasattr(EcovacsMower, kwargs["func"])
+
 
 async def test_mow_area_service_reaches_registered_entity(hass) -> None:
     """A valid service call reaches the registered lawn-mower entity method."""
