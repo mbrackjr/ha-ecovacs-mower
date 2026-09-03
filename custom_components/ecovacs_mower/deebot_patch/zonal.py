@@ -77,7 +77,9 @@ class MowArea(_AdaptiveFamily, Clean):
         super().__init__(CleanAction.START)
 
     def _get_args(self, action: CleanAction) -> dict[str, Any]:
-        """Keep command equality sensitive to the selected areas."""
+        # Inert as a wire payload: ``spotArea`` is constructed by the delegates
+        # below, and ``_execute`` is fully overridden. See CleanMower._get_args
+        # in ``commands.py`` for the same equality-only pattern and rationale.
         return {"act": action.value, "area": tuple(self._area)}
 
     def _delegate(self, family: Family) -> Command:
