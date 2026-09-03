@@ -172,6 +172,7 @@ async def test_mow_area_rejects_mowers_without_spot_area() -> None:
         _capability=SimpleNamespace(
             clean=SimpleNamespace(action=SimpleNamespace(area=MagicMock()))
         ),
+        _device=SimpleNamespace(device_info={"class": "test"}),
         _execute_command=AsyncMock(),
     )
 
