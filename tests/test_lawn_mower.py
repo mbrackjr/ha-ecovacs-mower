@@ -133,7 +133,6 @@ async def test_a_dropped_leaving_push_is_still_bounded_by_the_poll() -> None:
 
 async def test_mow_area_dispatches_through_entity_command() -> None:
     """A supported mower builds MowArea and uses the entity command wrapper."""
-    from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
     from deebot_client.models import CleanMode
@@ -144,16 +143,11 @@ async def test_mow_area_dispatches_through_entity_command() -> None:
     execute = AsyncMock()
     controller = MagicMock()
     device = MagicMock()
-    mower = SimpleNamespace(
-        _capability=SimpleNamespace(
-            clean=SimpleNamespace(action=SimpleNamespace(area=MowArea))
-        ),
-        _controller=controller,
-        _device=device,
-        _execute_command=execute,
-    )
+    device.capabilities.clean.action.area = MowArea
+    mower = EcovacsMower(device, controller)
+    mower._execute_command = execute
 
-    await EcovacsMower.async_mow_area(mower, [1, 3])
+    await mower.async_mow_area([1, 3])
 
     controller.start_polling.assert_called_once_with(device)
     execute.assert_awaited_once()
@@ -163,24 +157,19 @@ async def test_mow_area_dispatches_through_entity_command() -> None:
 
 async def test_mow_area_rejects_mowers_without_spot_area() -> None:
     """A mower with another area command is not advertised as zone capable."""
-    from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
     from homeassistant.exceptions import HomeAssistantError
 
     from custom_components.ecovacs_mower.lawn_mower import EcovacsMower
 
-    mower = SimpleNamespace(
-        _capability=SimpleNamespace(
-            clean=SimpleNamespace(action=SimpleNamespace(area=MagicMock()))
-        ),
-        _device=SimpleNamespace(device_info={"class": "test"}),
-        _execute_command=AsyncMock(),
-    )
+    device = MagicMock()
+    mower = EcovacsMower(device, MagicMock())
+    mower._execute_command = AsyncMock()
 
     with pytest.raises(HomeAssistantError, match="does not support zone mowing"):
-        await EcovacsMower.async_mow_area(mower, [1])
+        await mower.async_mow_area([1])
 
-    mower._capability.clean.action.area = None
+    device.capabilities.clean.action.area = None
     with pytest.raises(HomeAssistantError, match="does not support zone mowing"):
-        await EcovacsMower.async_mow_area(mower, [1])
+        await mower.async_mow_area([1])
