@@ -5,8 +5,6 @@ from deebot_client.hardware import _DEVICES
 
 from .. import requires_ha
 
-pytestmark = requires_ha
-
 O800 = "9bts2s"
 A1600_LIDAR = "e4gqia"
 SUPPORTED_CLASSES = (O800, A1600_LIDAR)
