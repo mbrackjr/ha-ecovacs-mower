@@ -1,6 +1,9 @@
 """Tests for the GOAT zone-mowing command."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
+from deebot_client.command import Command
 from deebot_client.commands.json.clean import Clean, CleanV2
 from deebot_client.hardware import _DEVICES, get_static_device_info
 
@@ -10,6 +13,9 @@ from custom_components.ecovacs_mower.deebot_patch.zonal import (
     _ZoneCleanNonV2,
     _ZoneCleanV2,
 )
+from custom_components.ecovacs_mower.deebot_patch.families import Family, selected
+
+from .test_commands import _DEVICE_INFO, _OK, _NO_ANSWER, _transport
 
 
 @pytest.fixture(autouse=True)
@@ -66,3 +72,31 @@ async def test_patch_exposes_the_area_command() -> None:
     await patch_device_info("e4gqia")
     info = await get_static_device_info("e4gqia")
     assert info.capabilities.clean.action.area is MowArea
+
+
+async def test_mow_area_executes_first_on_non_v2() -> None:
+    fake, sent = _transport(_OK)
+    command = MowArea("spotArea", [1, 3])
+
+    with patch.object(Command, "_execute", fake):
+        await command._execute(AsyncMock(), _DEVICE_INFO, AsyncMock())
+
+    assert sent == ["clean"]
+    assert command._delegate(Family.NON_V2)._args["content"]["value"] == "1,3"
+    assert selected(_DEVICE_INFO["did"]) is Family.NON_V2
+
+
+async def test_mow_area_falls_back_to_v2_and_commits_family() -> None:
+    fake, sent = _transport(_NO_ANSWER, _OK)
+    command = MowArea("spotArea", [1, 3])
+
+    with patch.object(Command, "_execute", fake):
+        await command._execute(AsyncMock(), _DEVICE_INFO, AsyncMock())
+
+    assert sent == ["clean", "clean_V2"]
+    assert selected(_DEVICE_INFO["did"]) is Family.V2
+
+
+def test_mow_area_keeps_clean_contract() -> None:
+    assert issubclass(MowArea, Clean)
+    assert MowArea.NAME == "clean"
