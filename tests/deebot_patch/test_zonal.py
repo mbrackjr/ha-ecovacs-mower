@@ -54,22 +54,26 @@ def test_v2_spot_area_payload_has_the_same_nested_shape() -> None:
 
 def test_mow_area_requires_spot_area_mode() -> None:
     with pytest.raises(ValueError, match="Unsupported mower area mode"):
-        MowArea("auto", [1])
+        MowArea(CleanMode.AUTO, [1])
 
 
 def test_mow_area_requires_an_area() -> None:
     with pytest.raises(ValueError, match="At least one area ID"):
-        MowArea("spotArea", [])
+        MowArea(CleanMode.SPOT_AREA, [])
 
 
 def test_mow_area_rejects_multiple_cleanings() -> None:
     with pytest.raises(ValueError, match="exactly one cleaning pass"):
-        MowArea("spotArea", [1], 2)
+        MowArea(CleanMode.SPOT_AREA, [1], 2)
 
 
 def test_mow_area_equality_includes_area_ids() -> None:
-    assert MowArea("spotArea", [1, 3]) == MowArea("spotArea", [1, 3])
-    assert MowArea("spotArea", [1, 3]) != MowArea("spotArea", [1, 2])
+    assert MowArea(CleanMode.SPOT_AREA, [1, 3]) == MowArea(
+        CleanMode.SPOT_AREA, [1, 3]
+    )
+    assert MowArea(CleanMode.SPOT_AREA, [1, 3]) != MowArea(
+        CleanMode.SPOT_AREA, [1, 2]
+    )
 
 
 async def test_patch_exposes_the_area_command() -> None:
@@ -80,7 +84,7 @@ async def test_patch_exposes_the_area_command() -> None:
 
 async def test_mow_area_executes_first_on_non_v2() -> None:
     fake, sent = _transport(_OK)
-    command = MowArea("spotArea", [1, 3])
+    command = MowArea(CleanMode.SPOT_AREA, [1, 3])
 
     with patch.object(Command, "_execute", fake):
         await command._execute(AsyncMock(), _DEVICE_INFO, AsyncMock())
@@ -92,7 +96,7 @@ async def test_mow_area_executes_first_on_non_v2() -> None:
 
 async def test_mow_area_falls_back_to_v2_and_commits_family() -> None:
     fake, sent = _transport(_NO_ANSWER, _OK)
-    command = MowArea("spotArea", [1, 3])
+    command = MowArea(CleanMode.SPOT_AREA, [1, 3])
 
     with patch.object(Command, "_execute", fake):
         await command._execute(AsyncMock(), _DEVICE_INFO, AsyncMock())
