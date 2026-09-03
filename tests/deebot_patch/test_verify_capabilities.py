@@ -1,6 +1,7 @@
 """The patched area capability reaches the actual device definition."""
 
 import pytest
+from deebot_client.hardware import _DEVICES
 
 from .. import requires_ha
 
@@ -8,6 +9,17 @@ pytestmark = requires_ha
 
 O800 = "9bts2s"
 A1600_LIDAR = "e4gqia"
+SUPPORTED_CLASSES = (O800, A1600_LIDAR)
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """Empty the library's cache between tests."""
+    for class_ in SUPPORTED_CLASSES:
+        _DEVICES.pop(class_, None)
+    yield
+    for class_ in SUPPORTED_CLASSES:
+        _DEVICES.pop(class_, None)
 
 
 @pytest.mark.parametrize("class_", [O800, A1600_LIDAR])
@@ -63,4 +75,3 @@ async def test_zone_device_receives_mow_area() -> None:
 
     assert zone.capabilities.clean.action.area is MowArea
     assert non_zone.capabilities.clean.action.area is not MowArea
-
