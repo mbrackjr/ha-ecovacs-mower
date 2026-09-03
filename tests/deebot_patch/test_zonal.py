@@ -20,9 +20,12 @@ from .test_commands import _DEVICE_INFO, _OK, _NO_ANSWER, _transport
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
-    """Empty the library cache between tests."""
+    """Empty the library's cache between tests."""
+    for class_ in ("e4gqia",):
+        _DEVICES.pop(class_, None)
     yield
-    _DEVICES.pop("e4gqia", None)
+    for class_ in ("e4gqia",):
+        _DEVICES.pop(class_, None)
 
 
 def test_zone_commands_are_clean_commands() -> None:
