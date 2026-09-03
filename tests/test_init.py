@@ -84,12 +84,12 @@ async def test_mow_area_service_validates_area_ids(hass) -> None:
         await hass.services.async_call(
             "ecovacs_mower",
             "mow_area",
-            {"entity_id": "lawn_mower.goat", "area_ids": [0]},
+            {"entity_id": "lawn_mower.goat", "area_ids": [-1]},
             blocking=True,
         )
 
 
-@pytest.mark.parametrize("value", [1, 999, "1", [1, 3, 999], ["1", "3", "999"]])
+@pytest.mark.parametrize("value", [0, 1, 999, "0", "1", [0, 1, 999], ["0", "1", "999"]])
 def test_area_ids_accept_valid_values(value) -> None:
     """The service schema accepts numeric IDs and text-selector strings."""
     from custom_components.ecovacs_mower import AREA_IDS_SCHEMA
@@ -99,7 +99,7 @@ def test_area_ids_accept_valid_values(value) -> None:
     assert AREA_IDS_SCHEMA(value) == expected
 
 
-@pytest.mark.parametrize("value", [0, -1, 1000, 1.5, "1.5", "abc", "", None, True])
+@pytest.mark.parametrize("value", [-1, 1000, 1.5, "1.5", "abc", "", None, True])
 def test_area_ids_reject_invalid_values(value) -> None:
     """The service schema rejects malformed or out-of-range IDs."""
     from custom_components.ecovacs_mower import AREA_IDS_SCHEMA
