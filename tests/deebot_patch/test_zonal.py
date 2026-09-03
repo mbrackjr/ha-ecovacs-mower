@@ -97,6 +97,7 @@ async def test_mow_area_falls_back_to_v2_and_commits_family() -> None:
         await command._execute(AsyncMock(), _DEVICE_INFO, AsyncMock())
 
     assert sent == ["clean", "clean_V2"]
+    assert command._delegate(Family.V2)._args["content"]["value"] == "1,3"
     assert selected(_DEVICE_INFO["did"]) is Family.V2
 
 
