@@ -129,7 +129,9 @@ class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):
         """Start mowing the selected saved areas."""
         area = self._capability.clean.action.area
         if area is not MowArea:
-            raise HomeAssistantError("This mower does not support zone mowing")
+            raise HomeAssistantError(
+                f"Mower class {self._device.device_info['class']} does not support zone mowing"
+            )
 
         self._controller.start_polling(self._device)
         await self._execute_command(area(CleanMode.SPOT_AREA, area_ids, 1))
