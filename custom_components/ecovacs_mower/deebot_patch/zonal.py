@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from deebot_client.command import Command
 from deebot_client.commands.json.clean import Clean, CleanV2
 from deebot_client.message import HandlingResult
-from deebot_client.models import CleanAction
+from deebot_client.models import CleanAction, CleanMode
 
 from .commands import _AdaptiveFamily, _NoActionRewrite
 from .families import Family
@@ -61,12 +61,12 @@ class MowArea(_AdaptiveFamily, Clean):
 
     def __init__(
         self,
-        mode: Any,
+        mode: CleanMode,
         area: list[int | float],
         cleanings: int = 1,
     ) -> None:
         """Initialize an area-clean command."""
-        if getattr(mode, "value", mode) != _TYPE_SPOT_AREA:
+        if mode is not CleanMode.SPOT_AREA:
             raise ValueError(f"Unsupported mower area mode: {mode}")
         if not area:
             raise ValueError("At least one area ID is required")
