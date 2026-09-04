@@ -9,11 +9,11 @@ They are deliberately scoped to that model here: the values have not been
 verified on the other mower classes supported by this integration.
 
 The area name is a separate response from ``getAreaSet``. The name parsing is
-based on the observation documented in DeebotUniverse/client.py#1596 and the
-follow-up discussion in #1684: an ``ar`` response contains compressed rows
-whose first fields are map ID, area ID and the user-editable name. This path is
-kept as a testable best-effort addition because it has not been confirmed on
-the A1600 LiDAR Pro.
+based on the observation documented in DeebotUniverse/client.py#1596 and
+#1684: an ``ar`` response contains chunked LZMA/base64 data whose decoded rows
+start with map ID, area ID and the user-editable name. This path is kept as a
+best-effort test surface because it has not been confirmed on the A1600 LiDAR
+Pro.
 """
 
 from __future__ import annotations
@@ -26,8 +26,9 @@ from weakref import WeakKeyDictionary
 import orjson
 from deebot_client.commands.json.custom import CustomCommand
 from deebot_client.events.base import Event
-from deebot_client.message import HandlingResult, HandlingState
-from deebot_client.rs.util import decompress_base64_data
+from deebot_client.message import HandlingResult
+
+from .geometry import FragmentBuffer
 
 if TYPE_CHECKING:
     from deebot_client.event_bus import EventBus
@@ -50,10 +51,17 @@ class MowerArea:
 
 
 @dataclass(frozen=True)
-class MowerAreaEvent(Event):
+class MowerAreaParameterEvent(Event):
     """The latest per-area parameter snapshot known for the mower."""
 
     areas: tuple[MowerArea, ...]
+
+
+@dataclass(frozen=True)
+class MowerAreaNameEvent(Event):
+    """The latest user-defined names known for mower areas."""
+
+    names: tuple[tuple[str, str], ...]
 
 
 _AREA_STATE: WeakKeyDictionary[EventBus, dict[str, MowerArea]] = WeakKeyDictionary()
@@ -64,9 +72,22 @@ def _areas_for(event_bus: EventBus) -> dict[str, MowerArea]:
     return _AREA_STATE.setdefault(event_bus, {})
 
 
-def _notify(event_bus: EventBus) -> None:
-    """Publish the current per-area snapshot."""
-    event_bus.notify(MowerAreaEvent(tuple(_areas_for(event_bus).values())))
+def _notify_parameters(event_bus: EventBus) -> None:
+    """Publish the current per-area parameter snapshot."""
+    event_bus.notify(MowerAreaParameterEvent(tuple(_areas_for(event_bus).values())))
+
+
+def _notify_names(event_bus: EventBus) -> None:
+    """Publish the current area names."""
+    event_bus.notify(
+        MowerAreaNameEvent(
+            tuple(
+                (area_id, area.name)
+                for area_id, area in _areas_for(event_bus).items()
+                if area.name is not None
+            )
+        )
+    )
 
 
 def _as_int(value: Any) -> int | None:
@@ -124,20 +145,19 @@ class GetAreaParameter(CustomCommand):
             )
 
         _AREA_STATE[event_bus] = areas
-        _notify(event_bus)
+        _notify_parameters(event_bus)
         return HandlingResult.success()
 
 
 class GetAreaSet(CustomCommand):
     """Read user-defined mower area names from the ``ar`` area set.
 
-    ``getAreaSet`` is not modelled by deebot-client. The payload shape used here
-    is the one reported for GOAT mowers in the documentation around
-    DeebotUniverse/client.py#1596: ``subsets`` is a compressed base64 JSON
-    array, and an ``ar`` row starts with map ID, area ID and the user-editable
-    name. This has not been confirmed on the A1600 LiDAR Pro, so malformed or
-    unsupported responses are ignored rather than allowed to affect the area
-    parameter path.
+    ``getAreaSet`` is not modelled by deebot-client. The response uses the same
+    chunked LZMA/base64 encoding as the mower map messages. For ``ar`` the
+    decoded rows are documented in DeebotUniverse/client.py#1684 as
+    ``mapID | areaID | name | neighbourIDs | 2 reference coordinates | flags``.
+    This has not been confirmed on the A1600 LiDAR Pro, so malformed or
+    unsupported responses are ignored rather than affecting area parameters.
     """
 
     NAME = "getAreaSet"
@@ -145,6 +165,7 @@ class GetAreaSet(CustomCommand):
     def __init__(self) -> None:
         """Build a request for mowing areas (``ar``)."""
         super().__init__({"type": "ar"})
+        self._buffer = FragmentBuffer()
 
     def _handle_response(
         self, event_bus: EventBus, response: dict[str, Any]
@@ -154,10 +175,31 @@ class GetAreaSet(CustomCommand):
             return super()._handle_response(event_bus, response)
 
         try:
-            subsets = response["resp"]["body"]["data"]["subsets"]
-            decoded = orjson.loads(decompress_base64_data(subsets))
-        except (KeyError, TypeError, ValueError, orjson.JSONDecodeError):
-            _LOGGER.debug("Could not decode getAreaSet response")
+            data = response["resp"]["body"]["data"]
+            info = data["subsets"]
+        except (KeyError, TypeError):
+            _LOGGER.debug("Unexpected getAreaSet response: %r", response)
+            return HandlingResult.analyse()
+
+        if not isinstance(info, str):
+            return HandlingResult.analyse()
+
+        # getAreaSet uses the same multipart fields as the mower map messages.
+        # A single response still works: index 0 plus the complete info is
+        # enough for FragmentBuffer to attempt decompression.
+        blob = self._buffer.add(
+            str(data.get("batid", "")),
+            int(data.get("index", 0)),
+            info,
+            int(data.get("infoSize", -1)),
+        )
+        if blob is None:
+            return HandlingResult.success()
+
+        try:
+            decoded = orjson.loads(blob)
+        except orjson.JSONDecodeError:
+            _LOGGER.debug("Could not decode getAreaSet payload")
             return HandlingResult.analyse()
 
         if not isinstance(decoded, list):
@@ -174,7 +216,7 @@ class GetAreaSet(CustomCommand):
             current = areas.get(area_id, MowerArea(area_id))
             areas[area_id] = replace(current, name=name.strip())
 
-        _notify(event_bus)
+        _notify_names(event_bus)
         return HandlingResult.success()
 
 
