@@ -107,7 +107,7 @@ class GetAreaParameter(CustomCommand):
 
     def __init__(self) -> None:
         """Build the empty getAreaParameter request."""
-        super().__init__({})
+        super().__init__(self.NAME, {})
 
     def _handle_response(
         self, event_bus: EventBus, response: dict[str, Any]
@@ -164,7 +164,7 @@ class GetAreaSet(CustomCommand):
 
     def __init__(self) -> None:
         """Build a request for mowing areas (``ar``)."""
-        super().__init__({"type": "ar"})
+        super().__init__(self.NAME, {"type": "ar"})
         self._buffer = FragmentBuffer()
 
     def _handle_response(
@@ -184,9 +184,6 @@ class GetAreaSet(CustomCommand):
         if not isinstance(info, str):
             return HandlingResult.analyse()
 
-        # getAreaSet uses the same multipart fields as the mower map messages.
-        # A single response still works: index 0 plus the complete info is
-        # enough for FragmentBuffer to attempt decompression.
         blob = self._buffer.add(
             str(data.get("batid", "")),
             int(data.get("index", 0)),
