@@ -115,11 +115,7 @@
       "lifespan_lens_brush": { "name": "Lens brush remaining" },
       "lifespan_trimmer_brush": { "name": "Trimmer brush remaining" },
       "lifespan_weed_rope": { "name": "Weed rope remaining" },
-      "beacon": { "name": "Beacon {serial}" },
-      "area_cutting_height": { "name": "{area_name} - Cutting height" },
-      "area_mowing_speed": { "name": "{area_name} - Mowing speed" },
-      "area_obstacle_height": { "name": "{area_name} - Obstacle height" },
-      "area_cut_direction": { "name": "{area_name} - Cutting direction" }
+      "beacon": { "name": "Beacon {serial}" }
     },
     "switch": {
       "advanced_mode": { "name": "Advanced mode" },
