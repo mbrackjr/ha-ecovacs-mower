@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from deebot_client.device import Device
-from deebot_client.message import Command
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
@@ -18,13 +16,11 @@ from .deebot_patch.areas import (
     AREA_PARAMETER_CLASSES,
     AREA_PARAMETER_PROFILES,
     GetAreaParameter,
-    MowerAreaParameterEvent,
     get_area,
 )
 
 SERVICE_SET_AREA_PARAMETERS = "set_area_parameters"
 AREA_PARAMETER_REFRESH_DELAY = 3.0
-AREA_PARAMETER_REFRESH_TIMEOUT = 15.0
 
 
 def _find_device(hass: HomeAssistant, device_id: str) -> Device:
@@ -34,63 +30,39 @@ def _find_device(hass: HomeAssistant, device_id: str) -> Device:
     if device_entry is None:
         raise ServiceValidationError("The selected mower device was not found")
 
+    device_dids = {
+        identifier[1]
+        for identifier in device_entry.identifiers
+        if identifier[0] == DOMAIN
+    }
     for config_entry_id in device_entry.config_entries:
         entry = hass.config_entries.async_get_entry(config_entry_id)
         if entry is None or entry.domain != DOMAIN or entry.runtime_data is None:
             continue
         for device in entry.runtime_data.devices:
-            if device.device_info["did"] in {
-                identifier[1]
-                for identifier in device_entry.identifiers
-                if identifier[0] == DOMAIN
-            }:
+            if device.device_info["did"] in device_dids:
                 return device
 
     raise ServiceValidationError("The selected mower is not loaded")
 
 
-async def _wait_for_current_area(
-    device: Device, area_id: str
-) -> Any:
-    """Refresh area parameters and wait for the mower's asynchronous answer."""
+async def _refresh_current_area(device: Device, area_id: str):
+    """Ask the mower for the current complete area parameter set."""
+    response = await device.execute_command(GetAreaParameter())
+    if not response or response.get("ret") != "ok":
+        raise ServiceValidationError("The mower did not return area parameters")
     current = get_area(device.events, area_id)
-    if current is not None:
-        return current
-
-    loop = asyncio.get_running_loop()
-    received: asyncio.Future[Any] = loop.create_future()
-
-    async def on_parameters(event: MowerAreaParameterEvent) -> None:
-        """Complete the wait when the requested area is received."""
-        area = next((item for item in event.areas if item.area_id == area_id), None)
-        if area is not None and not received.done():
-            received.set_result(area)
-
-    unsubscribe = device.events.subscribe(MowerAreaParameterEvent, on_parameters)
-    try:
-        device.events.request_refresh(MowerAreaParameterEvent)
-        return await asyncio.wait_for(received, AREA_PARAMETER_REFRESH_TIMEOUT)
-    except asyncio.TimeoutError as exc:
-        raise ServiceValidationError(
-            f"Timed out waiting for area {area_id} parameters from the mower"
-        ) from exc
-    finally:
-        unsubscribe()
+    if current is None:
+        raise ServiceValidationError(f"Area {area_id} was not returned by the mower")
+    return current
 
 
-async def _refresh_after_set(device: Device, area_id: str) -> None:
-    """Allow the cloud/device round trip to complete, then refresh the reading."""
+async def _refresh_after_set(device: Device) -> None:
+    """Wait for the mower/cloud round trip, then refresh the sensor state."""
+    # The API acknowledgement only establishes that the request reached the
+    # service endpoint. The mower still needs time to receive and apply it.
     await asyncio.sleep(AREA_PARAMETER_REFRESH_DELAY)
-    # The refresh command is asynchronous MQTT/REST work. Waiting for the
-    # resulting event is intentionally delegated to the event bus rather than
-    # assuming that execute_command() means the mower has already applied it.
-    device.events.request_refresh(MowerAreaParameterEvent)
-
-
-def _get_command(device: Device) -> Command:
-    """Return the command used to read all current area parameters."""
-    del device
-    return GetAreaParameter()
+    await device.execute_command(GetAreaParameter())
 
 
 async def async_set_area_parameters(hass: HomeAssistant, call: ServiceCall) -> None:
@@ -108,9 +80,7 @@ async def async_set_area_parameters(hass: HomeAssistant, call: ServiceCall) -> N
     profile = AREA_PARAMETER_PROFILES[class_]
 
     area_id = str(int(call.data["area_id"]))
-    current = await _wait_for_current_area(device, area_id)
-    if current is None:
-        raise ServiceValidationError(f"Area {area_id} was not returned by the mower")
+    current = await _refresh_current_area(device, area_id)
 
     if None in (
         current.mow_height_level,
@@ -130,28 +100,35 @@ async def async_set_area_parameters(hass: HomeAssistant, call: ServiceCall) -> N
         "angle": int(current.angle),
     }
 
-    if "mow_height_cm" in call.data:
-        payload["mowHeightLevel"] = profile.mow_height_to_wire(
-            float(call.data["mow_height_cm"])
-        )
-    if "speed_mps" in call.data:
-        payload["cutMode"] = profile.speed_to_wire(float(call.data["speed_mps"]))
-    if "obstacle_max_cm" in call.data:
-        payload["obstacleHeight"] = profile.obstacle_height_to_wire(
-            int(call.data["obstacle_max_cm"])
-        )
-    if "cutting_angle" in call.data:
-        payload["angle"] = profile.angle_to_wire(float(call.data["cutting_angle"]))
+    try:
+        if "mow_height_cm" in call.data:
+            payload["mowHeightLevel"] = profile.mow_height_to_wire(
+                float(call.data["mow_height_cm"])
+            )
+        if "speed_mps" in call.data:
+            payload["cutMode"] = profile.speed_to_wire(float(call.data["speed_mps"]))
+        if "obstacle_max_cm" in call.data:
+            payload["obstacleHeight"] = profile.obstacle_height_to_wire(
+                int(call.data["obstacle_max_cm"])
+            )
+        if "cutting_angle" in call.data:
+            payload["angle"] = profile.angle_to_wire(float(call.data["cutting_angle"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ServiceValidationError("One or more area parameter values are invalid") from exc
 
     from deebot_client.commands.json.custom import CustomCommand
 
     response = await device.execute_command(CustomCommand("setAreaParameter", payload))
-    if not response:
+    if not response or response.get("ret") != "ok":
         raise ServiceValidationError("The mower did not acknowledge setAreaParameter")
 
-    # The API acknowledgement only establishes that the request reached the
-    # service endpoint. Give the mower time to apply it before asking again.
-    await _refresh_after_set(device, area_id)
+    body = response.get("resp", {}).get("body", {})
+    if body.get("code") not in (None, 0, 200):
+        raise ServiceValidationError(
+            f"The mower rejected setAreaParameter (code {body.get('code')})"
+        )
+
+    await _refresh_after_set(device)
 
 
 def async_register(hass: HomeAssistant) -> None:
