@@ -3,12 +3,13 @@
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from homeassistant.exceptions import ServiceValidationError
 
+from custom_components.ecovacs_mower import services
 from custom_components.ecovacs_mower.deebot_patch.areas import (
     A1600_PROFILE,
     MowerArea,
 )
-from custom_components.ecovacs_mower import services
 
 
 @pytest.mark.parametrize(
@@ -69,6 +70,7 @@ async def test_set_area_parameters_sends_all_fields_and_keeps_omitted_values(
         side_effect=[
             {"ret": "ok", "resp": {"body": {"code": 0}}},
             {"ret": "ok", "resp": {"body": {"code": 0}}},
+            {"ret": "ok", "resp": {"body": {"code": 0}}},
         ]
     )
     current = MowerArea(
@@ -89,11 +91,15 @@ async def test_set_area_parameters_sends_all_fields_and_keeps_omitted_values(
         "speed_mps": "0.60",
     }
     hass = Mock()
-    monkeypatch.setattr(services, "async_extract_device_ids", Mock(return_value={"ha-device"}))
+    monkeypatch.setattr(
+        services,
+        "async_extract_device_ids",
+        Mock(return_value={"ha-device"}),
+    )
 
     await services.async_set_area_parameters(hass, call)
 
-    set_command = device.execute_command.await_args_list[0].args[0]
+    set_command = device.execute_command.await_args_list[1].args[0]
     assert set_command._args == {
         "areaID": "2",
         "mowHeightLevel": 4,
@@ -101,7 +107,7 @@ async def test_set_area_parameters_sends_all_fields_and_keeps_omitted_values(
         "obstacleHeight": 2,
         "angle": 214,
     }
-    assert device.execute_command.await_count == 2
+    assert device.execute_command.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -112,10 +118,14 @@ async def test_set_area_parameters_rejects_unsupported_mower(
     device = Mock()
     device.device_info = {"class": "not-validated", "did": "did"}
     monkeypatch.setattr(services, "_find_device", Mock(return_value=device))
-    monkeypatch.setattr(services, "async_extract_device_ids", Mock(return_value={"ha-device"}))
+    monkeypatch.setattr(
+        services,
+        "async_extract_device_ids",
+        Mock(return_value={"ha-device"}),
+    )
 
     call = Mock()
     call.data = {"device_id": "ha-device", "area_id": 1, "mow_height_cm": "6.0"}
 
-    with pytest.raises(Exception, match="not validated"):
+    with pytest.raises(ServiceValidationError, match="not validated"):
         await services.async_set_area_parameters(Mock(), call)
