@@ -202,6 +202,9 @@ class GetAreaSet(CustomCommand):
             self.NAME,
             {"mid": "1", "aid": "0", "type": "ar"},
         )
+        # Keep the reassembly buffer on each command instance so multipart
+        # responses can be accumulated across asynchronous MQTT callbacks.
+        self._buffer = _AreaSetFragmentBuffer()
 
     def _handle_response(
         self, event_bus: EventBus, response: dict[str, Any]
