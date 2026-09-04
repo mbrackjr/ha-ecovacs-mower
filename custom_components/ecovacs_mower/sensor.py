@@ -68,7 +68,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
 from . import EcovacsMowerConfigEntry
-from .area_sensors import async_setup_area_sensors
+from .area_sensors import area_sensor_descriptions, async_setup_area_sensors
 from .const import SUPPORTED_LIFESPANS
 from .deebot_patch import SUPPORTED_CLASSES
 from .deebot_patch.messages import (
