@@ -60,10 +60,11 @@ def area_sensor_description(
         name=parameter_name,
         value_fn=value_fn,
         parameter_name=parameter_name,
-        # Keep the area ID in the suggested object ID so newly created entities
-        # use a stable area-ID-based object ID (for example, area_1_cutting_height)
-        # instead of depending on the mower's user-editable friendly name.
-        suggested_object_id=key,
+        # Keep the numeric area ID in the suggested object ID so newly created
+        # entities use a stable area-ID-based object ID (for example,
+        # 2_cutting_height) instead of depending on the mower's user-editable
+        # friendly name. The entity key retains the area_ prefix internally.
+        suggested_object_id=f"{area_id}_{key_suffix}",
         entity_category=EntityCategory.DIAGNOSTIC,
         **kwargs,
     )
