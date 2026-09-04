@@ -1,4 +1,14 @@
-"""Mower area parameter sensors."""
+"""Mower area parameter sensors.
+
+These entities are dynamic because the mower does not declare its area count in
+its device capabilities. ``getAreaParameter`` is the source of truth for which
+areas currently have parameters; ``getAreaSet`` supplies the user-editable name
+when the mower supports that response.
+
+The parameter values are read-only in this change. The device requires all five
+``setAreaParameter`` fields on every write, so adding a write path before the
+read/merge state is deliberately left for a separate change.
+"""
 
 from __future__ import annotations
 
