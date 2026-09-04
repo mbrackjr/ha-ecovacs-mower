@@ -16,6 +16,13 @@ from deebot_client.capabilities import CapabilityEvent
 from deebot_client.events import StateEvent, StatsEvent
 from deebot_client.hardware import _DEVICES, get_static_device_info
 
+from .areas import (
+    AREA_PARAMETER_CLASSES,
+    GetAreaParameter,
+    GetAreaSet,
+    MowerAreaNameEvent,
+    MowerAreaParameterEvent,
+)
 from .commands import (
     CleanMower,
     GetLifeSpanMower,
@@ -169,19 +176,18 @@ async def patch_device_info(class_: str) -> None:
     # every mower — beacon-equipped or not — asks twice at startup and on
     # every reconnect. Both parse the one answer correctly; only the extra
     # round trip is paid.
-    object.__setattr__(
-        patched,
-        "_events",
-        MappingProxyType(
-            {
-                **patched._events,
-                MowerProtectStateEvent: [GetProtectState()],
-                MowerRainDelayEvent: [GetRainDelay()],
-                MowerStatsEvent: [GetStatsMower()],
-                MowerBeaconsEvent: [GetLifeSpanMower(capabilities.life_span.types)],
-            }
-        ),
-    )
+    events = {
+        **patched._events,
+        MowerProtectStateEvent: [GetProtectState()],
+        MowerRainDelayEvent: [GetRainDelay()],
+        MowerStatsEvent: [GetStatsMower()],
+        MowerBeaconsEvent: [GetLifeSpanMower(capabilities.life_span.types)],
+    }
+    if class_ in AREA_PARAMETER_CLASSES:
+        events[MowerAreaParameterEvent] = [GetAreaParameter()]
+        events[MowerAreaNameEvent] = [GetAreaSet()]
+
+    object.__setattr__(patched, "_events", MappingProxyType(events))
 
     _DEVICES[class_] = replace(base, capabilities=patched)
     _LOGGER.debug("Patched capabilities for %s", class_)

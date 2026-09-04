@@ -6,9 +6,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.typing import ConfigType
 
 from .const import CONF_CREDENTIALS, DOMAIN
 from .controller import EcovacsController, async_remove_map_store
+from .services import async_register as async_register_services
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -22,6 +24,12 @@ PLATFORMS = [
 ]
 
 type EcovacsMowerConfigEntry = ConfigEntry[EcovacsController]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up the integration and register its service actions."""
+    async_register_services(hass)
+    return True
 
 
 async def async_setup_entry(

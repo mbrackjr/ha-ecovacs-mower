@@ -16,6 +16,13 @@ from deebot_client.events import StateEvent
 from deebot_client.hardware import _DEVICES
 from deebot_client.messages.json import MESSAGES
 
+from .areas import (
+    AREA_PARAMETER_CLASSES,
+    GetAreaParameter,
+    GetAreaSet,
+    MowerAreaNameEvent,
+    MowerAreaParameterEvent,
+)
 from .authentication import AccountAuthenticator
 from .commands import CleanMower, GetCleanInfoMower, MowerStateRefresh, has_family
 from .families import attempted_family_name
@@ -139,3 +146,20 @@ def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
             f"{[type(c).__name__ for c in commands]} instead of "
             f"[MowerStateRefresh]"
         )
+
+    if class_ in AREA_PARAMETER_CLASSES:
+        parameter_commands = capabilities.get_refresh_commands(MowerAreaParameterEvent)
+        if [type(command) for command in parameter_commands] != [GetAreaParameter]:
+            _fail(
+                f"the area parameter commands for {class_} are "
+                f"{[type(c).__name__ for c in parameter_commands]} instead of "
+                f"[GetAreaParameter]"
+            )
+
+        name_commands = capabilities.get_refresh_commands(MowerAreaNameEvent)
+        if [type(command) for command in name_commands] != [GetAreaSet]:
+            _fail(
+                f"the area name commands for {class_} are "
+                f"{[type(c).__name__ for c in name_commands]} instead of "
+                f"[GetAreaSet]"
+            )

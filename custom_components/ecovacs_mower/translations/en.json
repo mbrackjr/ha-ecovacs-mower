@@ -48,6 +48,34 @@
       }
     }
   },
+  "services": {
+    "set_area_parameters": {
+      "name": "Set area parameters",
+      "description": "Set mowing parameters for one mower area. Any omitted parameter keeps its current value.",
+      "fields": {
+        "area_id": {
+          "name": "Area ID",
+          "description": "Numeric area ID from the mower map."
+        },
+        "mow_height_cm": {
+          "name": "Cutting height",
+          "description": "Desired grass height. Leave empty to keep the current value."
+        },
+        "speed_mps": {
+          "name": "Mowing speed",
+          "description": "Desired mowing speed. Leave empty to keep the current value."
+        },
+        "obstacle_max_cm": {
+          "name": "Obstacle height",
+          "description": "Maximum obstacle height considered an obstacle. Leave empty to keep the current value."
+        },
+        "cutting_angle": {
+          "name": "Cutting angle",
+          "description": "Cutting direction in degrees. Leave empty to keep the current value."
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "animal_protect": { "name": "Animal protection" },

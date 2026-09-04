@@ -68,6 +68,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
 from . import EcovacsMowerConfigEntry
+from .area_sensors import area_sensor_descriptions, async_setup_area_sensors
 from .const import SUPPORTED_LIFESPANS
 from .deebot_patch import SUPPORTED_CLASSES
 from .deebot_patch.messages import (
@@ -361,6 +362,7 @@ async def async_setup_entry(
             continue
         _async_setup_beacons(device, config_entry, async_add_entities)
 
+    await async_setup_area_sensors(config_entry, async_add_entities)
     async_add_entities(entities)
 
 
