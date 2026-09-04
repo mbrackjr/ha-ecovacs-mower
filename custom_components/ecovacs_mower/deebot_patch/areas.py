@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 from weakref import WeakKeyDictionary
 
 import orjson
@@ -34,6 +34,98 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 AREA_PARAMETER_CLASSES = frozenset({"e4gqia"})
+
+
+@dataclass(frozen=True)
+class AreaParameterProfile:
+    """Human/wire conversion rules for one mower class or firmware family."""
+
+    mow_height_to_wire: Callable[[float], int]
+    mow_height_from_wire: Callable[[int], float | None]
+    speed_to_wire: Callable[[float], int]
+    speed_from_wire: Callable[[int], float | None]
+    obstacle_height_to_wire: Callable[[int], int]
+    obstacle_height_from_wire: Callable[[int], int | None]
+    angle_to_wire: Callable[[float], int]
+    angle_from_wire: Callable[[int], int | None]
+    mow_height_values: tuple[float, ...]
+    speed_values: tuple[float, ...]
+    obstacle_height_values: tuple[int, ...]
+
+
+def _a1600_mow_height_to_wire(cm: float) -> int:
+    """Convert A1600 grass height in cm to its wire level."""
+    value = float(cm)
+    if value not in A1600_PROFILE.mow_height_values:
+        raise ValueError(f"Unsupported mowing height: {cm}")
+    return int(10 - value)
+
+
+def _a1600_mow_height_from_wire(level: int) -> float | None:
+    """Convert an A1600 wire level to grass height in cm."""
+    if level not in range(1, 8):
+        return None
+    return float(10 - level)
+
+
+def _a1600_speed_to_wire(speed: float) -> int:
+    """Convert A1600 mowing speed in m/s to cutMode."""
+    value = round(float(speed), 2)
+    if value not in A1600_PROFILE.speed_values:
+        raise ValueError(f"Unsupported mowing speed: {speed}")
+    return int(round(7 - ((value - 0.40) / 0.05)))
+
+
+def _a1600_speed_from_wire(level: int) -> float | None:
+    """Convert A1600 cutMode to mowing speed in m/s."""
+    if level not in range(1, 8):
+        return None
+    return round(0.40 + 0.05 * (7 - level), 2)
+
+
+def _a1600_obstacle_height_to_wire(cm: int) -> int:
+    """Convert A1600 obstacle threshold in cm to obstacleHeight."""
+    value = int(cm)
+    return {10: 1, 15: 2, 20: 3}[value]
+
+
+def _a1600_obstacle_height_from_wire(level: int) -> int | None:
+    """Convert A1600 obstacleHeight to the obstacle threshold in cm."""
+    return {1: 10, 2: 15, 3: 20}.get(level)
+
+
+def _a1600_angle_to_wire(degrees: float) -> int:
+    """Convert A1600 app-space cutting angle to wire-space angle."""
+    value = float(degrees)
+    if value < 0 or value >= 360:
+        raise ValueError(f"Unsupported cutting angle: {degrees}")
+    return int(round(270 - value)) % 360
+
+
+def _a1600_angle_from_wire(wire_angle: int) -> int | None:
+    """Convert A1600 wire-space angle to app-space cutting angle."""
+    if wire_angle not in range(360):
+        return None
+    return (270 - wire_angle) % 360
+
+
+A1600_PROFILE = AreaParameterProfile(
+    mow_height_to_wire=_a1600_mow_height_to_wire,
+    mow_height_from_wire=_a1600_mow_height_from_wire,
+    speed_to_wire=_a1600_speed_to_wire,
+    speed_from_wire=_a1600_speed_from_wire,
+    obstacle_height_to_wire=_a1600_obstacle_height_to_wire,
+    obstacle_height_from_wire=_a1600_obstacle_height_from_wire,
+    angle_to_wire=_a1600_angle_to_wire,
+    angle_from_wire=_a1600_angle_from_wire,
+    # A1600 LiDAR Pro confirmed values. New mower/firmware families should add
+    # a profile rather than changing these conversion functions.
+    mow_height_values=tuple(float(value) for value in range(3, 10)),
+    speed_values=tuple(round(0.40 + 0.05 * i, 2) for i in range(7)),
+    obstacle_height_values=(10, 15, 20),
+)
+
+AREA_PARAMETER_PROFILES = {"e4gqia": A1600_PROFILE}
 
 
 @dataclass(frozen=True)
@@ -68,6 +160,11 @@ _AREA_STATE: WeakKeyDictionary[EventBus, dict[str, MowerArea]] = WeakKeyDictiona
 def _areas_for(event_bus: EventBus) -> dict[str, MowerArea]:
     """Return the per-device area state."""
     return _AREA_STATE.setdefault(event_bus, {})
+
+
+def get_area(event_bus: EventBus, area_id: str) -> MowerArea | None:
+    """Return the most recently received parameters for an area."""
+    return _areas_for(event_bus).get(str(area_id))
 
 
 def _notify_parameters(event_bus: EventBus) -> None:
@@ -193,17 +290,10 @@ class GetAreaSet(CustomCommand):
 
     def __init__(self) -> None:
         """Build a request for mowing areas (``ar``)."""
-        # The GOAT expects mid/aid as well as type in the body data. A request
-        # containing only ``type=ar`` is rejected by the A1600 with
-        # ``code=20011, msg=get aid error``. This mirrors the payload emitted
-        # by the Ecovacs app and is required even though the response itself
-        # carries the area records.
         super().__init__(
             self.NAME,
             {"mid": "1", "aid": "0", "type": "ar"},
         )
-        # Keep the reassembly buffer on each command instance so multipart
-        # responses can be accumulated across asynchronous MQTT callbacks.
         self._buffer = _AreaSetFragmentBuffer()
 
     def _handle_response(
@@ -266,40 +356,20 @@ def reset() -> None:
 
 
 def decode_mow_height(level: int) -> float | None:
-    """Convert A1600 ``mowHeightLevel`` to the grass height in centimetres.
-
-    Confirmed on the A1600 LiDAR Pro specifically: levels 1–7 leave 9–3 cm of
-    grass respectively. The observed formula is ``cm = 10 - mowHeightLevel``.
-    """
-    if level not in range(1, 8):
-        return None
-    return float(10 - level)
+    """Convert A1600 ``mowHeightLevel`` to the grass height in centimetres."""
+    return A1600_PROFILE.mow_height_from_wire(level)
 
 
 def decode_cut_speed(level: int) -> float | None:
-    """Convert A1600 ``cutMode`` to mowing speed in metres per second.
-
-    Confirmed on the A1600 LiDAR Pro specifically: levels 1–7 mean 0.70–0.40
-    m/s respectively. The observed formula is
-    ``speed_ms = 0.40 + 0.05 × (7 - cutMode)``.
-    """
-    if level not in range(1, 8):
-        return None
-    return round(0.40 + 0.05 * (7 - level), 2)
+    """Convert A1600 ``cutMode`` to mowing speed in metres per second."""
+    return A1600_PROFILE.speed_from_wire(level)
 
 
 def decode_obstacle_height(level: int) -> int | None:
     """Convert A1600 ``obstacleHeight`` to the obstacle threshold in cm."""
-    return {1: 10, 2: 15, 3: 20}.get(level)
+    return A1600_PROFILE.obstacle_height_from_wire(level)
 
 
 def decode_cut_angle(wire_angle: int) -> int | None:
-    """Convert the A1600 wire-space angle to the app-space angle.
-
-    Confirmed on the A1600 LiDAR Pro specifically. The observed symmetric
-    conversion is ``app = (270 - wire) mod 360``; the same formula converts the
-    app value back to wire space.
-    """
-    if wire_angle not in range(360):
-        return None
-    return (270 - wire_angle) % 360
+    """Convert A1600 wire-space angle to the app-space angle."""
+    return A1600_PROFILE.angle_from_wire(wire_angle)
