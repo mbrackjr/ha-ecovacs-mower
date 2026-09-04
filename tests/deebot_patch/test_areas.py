@@ -1,6 +1,6 @@
 """Tests for mower area parameter and name parsing."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 from deebot_client.message import HandlingState
 
@@ -35,35 +35,12 @@ def test_get_area_parameter_publishes_all_verified_fields() -> None:
     event_bus = Mock()
     result = GetAreaParameter()._handle_response(
         event_bus,
-        {
-            "ret": "ok",
-            "resp": {
-                "body": {
-                    "data": {
-                        "areaParameters": [
-                            {
-                                "areaID": 3,
-                                "mowHeightLevel": 4,
-                                "cutMode": 6,
-                                "obstacleHeight": 2,
-                                "angle": 90,
-                            }
-                        ]
-                    }
-                }
-            },
-        },
+        {"ret": "ok", "resp": {"body": {"data": {"areaParameters": [{"areaID": 3, "mowHeightLevel": 4, "cutMode": 6, "obstacleHeight": 2, "angle": 90}]}}}},
     )
 
     assert result.state is HandlingState.SUCCESS
     assert event_bus.notify.call_args_list == [
-        call(MowerAreaParameterEvent(areas=(MowerArea(
-            area_id="3",
-            mow_height_level=4,
-            cut_mode=6,
-            obstacle_height=2,
-            angle=90,
-        ),)))
+        call(MowerAreaParameterEvent(areas=(MowerArea(area_id="3", mow_height_level=4, cut_mode=6, obstacle_height=2, angle=90),)))
     ]
 
 
@@ -74,10 +51,6 @@ def test_get_area_parameter_preserves_a_previously_read_name() -> None:
         {"ret": "ok", "resp": {"body": {"data": {"areaParameters": [{"areaID": 3, "mowHeightLevel": 4}]}}}},
     )
     event_bus.reset_mock()
-
-    # Names arrive independently from getAreaSet; the next parameter refresh
-    # must not discard the friendly name.
-    from custom_components.ecovacs_mower.deebot_patch.areas import GetAreaSet
 
     area_set = GetAreaSet()
     area_set._buffer.add = Mock(return_value=b'[["map", "3", "Front lawn", [], [], [], 0]]')
@@ -99,9 +72,7 @@ def test_get_area_parameter_preserves_a_previously_read_name() -> None:
 def test_get_area_set_publishes_user_defined_names() -> None:
     event_bus = Mock()
     command = GetAreaSet()
-    command._buffer.add = Mock(
-        return_value=b'[["123", "7", "Front lawn", [], [100, 200], [300, 400], 0]]'
-    )
+    command._buffer.add = Mock(return_value=b'[["123", "7", "Front lawn", [], [100, 200], [300, 400], 0]]')
 
     result = command._handle_response(
         event_bus,
