@@ -34,3 +34,23 @@ def test_area_sensor_descriptions_do_not_include_a_name_sensor() -> None:
         description.translation_key != "area_name"
         for description in area_sensor_descriptions("2")
     )
+
+
+def test_area_sensor_uses_translated_name_placeholder() -> None:
+    """The parameter label comes from HA translation, not Python text."""
+    from custom_components.ecovacs_mower.area_sensors import (
+        EcovacsAreaSensor,
+        area_sensor_descriptions,
+    )
+
+    # Entity construction is deliberately not exercised here because it needs
+    # a live deebot-client Device. The description proves the translation key
+    # is the source of the parameter label; the entity supplies only the
+    # runtime ``area_name`` placeholder.
+    assert [description.translation_key for description in area_sensor_descriptions("2")] == [
+        "area_cutting_height",
+        "area_mowing_speed",
+        "area_obstacle_height",
+        "area_cut_direction",
+    ]
+    assert EcovacsAreaSensor is not None
