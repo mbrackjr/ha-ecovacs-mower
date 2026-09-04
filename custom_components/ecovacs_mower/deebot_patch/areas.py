@@ -156,7 +156,15 @@ class _AreaSetFragmentBuffer:
     def add(
         self, batid: str, index: int, fragment: str, info_size: int
     ) -> bytes | None:
-        """Add a fragment; return decoded data once complete."""
+        """Add a fragment and return decoded data when the stream is complete.
+
+        ``infoSize`` in the mower ``ar`` response is not the size of the
+        decompressed JSON returned by ``decompress_base64_data``. The A1600,
+        for example, reports ``infoSize=498`` while its decoded JSON is 196
+        bytes. Completion is therefore determined by successful decompression
+        rather than by comparing the decompressed length with ``infoSize``.
+        """
+        del info_size
         parts = self._batches.setdefault(batid, {})
         self._batches.move_to_end(batid)
         parts[index] = fragment
@@ -167,8 +175,6 @@ class _AreaSetFragmentBuffer:
         try:
             blob = decompress_base64_data(joined)
         except (ValueError, RuntimeError):
-            return None
-        if len(blob) != info_size:
             return None
         del self._batches[batid]
         return blob
