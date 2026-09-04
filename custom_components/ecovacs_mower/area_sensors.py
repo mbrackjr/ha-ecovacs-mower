@@ -65,6 +65,60 @@ def area_sensor_description(
     )
 
 
+def area_sensor_descriptions(
+    area_id: str = "EXAMPLE",
+) -> tuple[EcovacsAreaSensorEntityDescription, ...]:
+    """Return the descriptions used by every dynamic area sensor.
+
+    The area ID is only used to make the entity key unique. Translation keys
+    are shared by all areas and are therefore safe to use for translation/icon
+    consistency checks without creating an actual entity.
+    """
+    return (
+        area_sensor_description(
+            area_id,
+            "cutting_height",
+            "area_cutting_height",
+            lambda area: decode_mow_height(area.mow_height_level)
+            if area.mow_height_level is not None
+            else None,
+            native_unit_of_measurement=UnitOfLength.CENTIMETERS,
+        ),
+        area_sensor_description(
+            area_id,
+            "mowing_speed",
+            "area_mowing_speed",
+            lambda area: decode_cut_speed(area.cut_mode)
+            if area.cut_mode is not None
+            else None,
+            native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
+        ),
+        area_sensor_description(
+            area_id,
+            "obstacle_height",
+            "area_obstacle_height",
+            lambda area: decode_obstacle_height(area.obstacle_height)
+            if area.obstacle_height is not None
+            else None,
+            native_unit_of_measurement=UnitOfLength.CENTIMETERS,
+        ),
+        area_sensor_description(
+            area_id,
+            "cut_direction",
+            "area_cut_direction",
+            lambda area: decode_cut_angle(area.angle)
+            if area.angle is not None
+            else None,
+            native_unit_of_measurement=DEGREE,
+        ),
+        SensorEntityDescription(
+            key=f"area_{area_id}_name",
+            translation_key="area_name",
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+    )
+
+
 class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
     """Read one interpreted parameter from one mower area."""
 
@@ -185,60 +239,13 @@ def _setup_device_area_sensors(
         if area_id in known:
             return
         known.add(area_id)
+        descriptions = area_sensor_descriptions(area_id)
         async_add_entities(
             [
-                EcovacsAreaSensor(
-                    device,
-                    area_id,
-                    area_sensor_description(
-                        area_id,
-                        "cutting_height",
-                        "area_cutting_height",
-                        lambda area: decode_mow_height(area.mow_height_level)
-                        if area.mow_height_level is not None
-                        else None,
-                        native_unit_of_measurement=UnitOfLength.CENTIMETERS,
-                    ),
-                ),
-                EcovacsAreaSensor(
-                    device,
-                    area_id,
-                    area_sensor_description(
-                        area_id,
-                        "mowing_speed",
-                        "area_mowing_speed",
-                        lambda area: decode_cut_speed(area.cut_mode)
-                        if area.cut_mode is not None
-                        else None,
-                        native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
-                    ),
-                ),
-                EcovacsAreaSensor(
-                    device,
-                    area_id,
-                    area_sensor_description(
-                        area_id,
-                        "obstacle_height",
-                        "area_obstacle_height",
-                        lambda area: decode_obstacle_height(area.obstacle_height)
-                        if area.obstacle_height is not None
-                        else None,
-                        native_unit_of_measurement=UnitOfLength.CENTIMETERS,
-                    ),
-                ),
-                EcovacsAreaSensor(
-                    device,
-                    area_id,
-                    area_sensor_description(
-                        area_id,
-                        "cut_direction",
-                        "area_cut_direction",
-                        lambda area: decode_cut_angle(area.angle)
-                        if area.angle is not None
-                        else None,
-                        native_unit_of_measurement=DEGREE,
-                    ),
-                ),
+                EcovacsAreaSensor(device, area_id, descriptions[0]),
+                EcovacsAreaSensor(device, area_id, descriptions[1]),
+                EcovacsAreaSensor(device, area_id, descriptions[2]),
+                EcovacsAreaSensor(device, area_id, descriptions[3]),
                 EcovacsAreaNameSensor(device, area_id),
             ]
         )
