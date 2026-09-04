@@ -193,8 +193,15 @@ class GetAreaSet(CustomCommand):
 
     def __init__(self) -> None:
         """Build a request for mowing areas (``ar``)."""
-        super().__init__(self.NAME, {"type": "ar"})
-        self._buffer = _AreaSetFragmentBuffer()
+        # The GOAT expects mid/aid as well as type in the body data. A request
+        # containing only ``type=ar`` is rejected by the A1600 with
+        # ``code=20011, msg=get aid error``. This mirrors the payload emitted
+        # by the Ecovacs app and is required even though the response itself
+        # carries the area records.
+        super().__init__(
+            self.NAME,
+            {"mid": "1", "aid": "0", "type": "ar"},
+        )
 
     def _handle_response(
         self, event_bus: EventBus, response: dict[str, Any]
