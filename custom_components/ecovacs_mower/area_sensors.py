@@ -178,6 +178,23 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
     async def async_added_to_hass(self) -> None:
         """Set up the event listeners now that hass is ready."""
         await super().async_added_to_hass()
+
+        # Earlier PR4 revisions accidentally exposed the internal entity key
+        # (``area_<id>_<parameter>``) as the suggested object ID, producing
+        # entity IDs such as ``..._area_area_4_obstacle_height``. The corrected
+        # description above fixes newly created entities; this one-time registry
+        # migration fixes entities that already exist, without changing their
+        # unique IDs or user-overridden names.
+        if self.hass is not None and self.entity_id is not None:
+            registry = er.async_get(self.hass)
+            legacy_entity_id = self.entity_id
+            new_entity_id = legacy_entity_id.replace("_area_area_", "_area_", 1)
+            if new_entity_id != legacy_entity_id and registry.async_get(new_entity_id) is None:
+                registry.async_update_entity(
+                    legacy_entity_id,
+                    new_entity_id=new_entity_id,
+                )
+
         self._subscribe(MowerAreaParameterEvent, self._on_parameters)
 
     async def _on_parameters(self, event: MowerAreaParameterEvent) -> None:
