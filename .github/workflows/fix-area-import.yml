@@ -1,0 +1,36 @@
+name: Fix area import
+
+on:
+  push:
+    branches:
+      - feat/area-parameter-sensors
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/area-parameter-sensors
+          fetch-depth: 0
+      - name: Fix import order
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("custom_components/ecovacs_mower/sensor.py")
+          text = path.read_text()
+          old = '''from . import EcovacsMowerConfigEntry\nfrom .const import SUPPORTED_LIFESPANS\nfrom .deebot_patch import SUPPORTED_CLASSES\nfrom .deebot_patch.messages import (\n    MowerBeaconsEvent,\n    MowerJobEdgeEvent,\n    MowerStatsEvent,\n    MowerTriggerEvent,\n)\nfrom .area_sensors import async_setup_area_sensors\n'''
+          new = '''from . import EcovacsMowerConfigEntry\nfrom .area_sensors import async_setup_area_sensors\nfrom .const import SUPPORTED_LIFESPANS\nfrom .deebot_patch import SUPPORTED_CLASSES\nfrom .deebot_patch.messages import (\n    MowerBeaconsEvent,\n    MowerJobEdgeEvent,\n    MowerStatsEvent,\n    MowerTriggerEvent,\n)\n'''
+          if old not in text:
+              raise SystemExit("import block not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/ecovacs_mower/sensor.py
+          git commit -m "Fix area sensor import order"
+          git push
