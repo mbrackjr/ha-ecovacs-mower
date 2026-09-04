@@ -99,6 +99,34 @@ def test_get_area_set_ignores_malformed_rows() -> None:
     event_bus.notify.assert_not_called()
 
 
+def test_get_area_set_decodes_a1600_friendly_names() -> None:
+    event_bus = Mock()
+    command = GetAreaSet()
+    command._handle_response(
+        event_bus,
+        {
+            "ret": "ok",
+            "resp": {
+                "body": {
+                    "data": {
+                        "subsets": "XQAABADEAAAAAC2WwEIAXhRj1JRBvSkBj/qBdAqB2QX0SG8/Vr8oDwPJ5NhnNLN8YjP8Zc0eJW+vO0bzfPWbfdtdB6JF19pttHbyaY0KU4cvE6HhcDC51FGUUnht81uyBrRaVIOJj7USxtAfp/hSzRTfkf6A",
+                        "infoSize": 498,
+                    }
+                }
+            },
+        },
+    )
+
+    event = event_bus.notify.call_args.args[0]
+    assert isinstance(event, MowerAreaNameEvent)
+    assert dict(event.names) == {
+        "1": "Achtertuin",
+        "3": "Zijtuin",
+        "2": "Voortuin",
+        "4": "Laadstation",
+    }
+
+
 def test_a1600_mow_height_calibration() -> None:
     assert [decode_mow_height(level) for level in range(1, 8)] == [9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0]
     assert decode_mow_height(0) is None
