@@ -5,9 +5,11 @@ its device capabilities. ``getAreaParameter`` is the source of truth for which
 areas currently have parameters; ``getAreaSet`` supplies the user-editable name
 when the mower supports that response.
 
-The parameter values are read-only in this change. The device requires all five
-``setAreaParameter`` fields on every write, so adding a write path before the
-read/merge state is deliberately left for a separate change.
+The parameter values are displayed as human-readable read sensors. Writing is
+provided separately by the ``set_area_parameters`` integration service because
+the device requires all five ``setAreaParameter`` fields on every write; the
+service reads the complete current set, merges the requested fields, and then
+sends the complete payload.
 """
 
 from __future__ import annotations
