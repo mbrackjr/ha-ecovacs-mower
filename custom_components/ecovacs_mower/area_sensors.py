@@ -117,6 +117,14 @@ def area_sensor_descriptions(
     )
 
 
+_AREA_SENSOR_SUFFIXES = {
+    "area_cutting_height": "Cutting height",
+    "area_mowing_speed": "Mowing speed",
+    "area_obstacle_height": "Obstacle height",
+    "area_cut_direction": "Cutting direction",
+}
+
+
 class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
     """Read one interpreted parameter from one mower area."""
 
@@ -127,17 +135,19 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
         device: Device,
         area_id: str,
         description: EcovacsAreaSensorEntityDescription,
+        area_name: str | None = None,
     ) -> None:
         """Initialize entity."""
         super().__init__(device, device.capabilities, description)
         self._area_id = area_id
-        # The entity description is dynamic, but HA's entity registry is keyed
-        # by this stable ID rather than by the translated name. The explicit
-        # icon assignment also makes the icon independent of dynamic
-        # translation-key resolution.
+        self._area_name = area_name or f"Area {area_id}"
+        # Dynamic entity names cannot rely on translation placeholders alone:
+        # the name event may arrive after HA has registered the entity. Keep the
+        # stable unique_id from the description and update the entity's explicit
+        # name when the mower reports a new friendly name.
+        self._set_area_name(self._area_name)
         if description.icon:
             self._attr_icon = description.icon
-        self._attr_translation_placeholders = {"area_name": f"Area {area_id}"}
 
     @override
     async def async_added_to_hass(self) -> None:
@@ -153,7 +163,7 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
             self._attr_native_value = None
             self.async_write_ha_state()
             return
-        self._set_area_name(area)
+        self._set_area_name(_area_name(area))
         self._attr_native_value = self.entity_description.value_fn(area)
         self.async_write_ha_state()
 
@@ -164,12 +174,15 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
         )
         if name is None:
             return
-        self._attr_translation_placeholders = {"area_name": name}
+        self._set_area_name(name)
         self.async_write_ha_state()
 
-    def _set_area_name(self, area: MowerArea) -> None:
-        """Set the friendly-name placeholder for this area."""
-        self._attr_translation_placeholders = {"area_name": _area_name(area)}
+    def _set_area_name(self, name: str) -> None:
+        """Set the complete user-facing entity name."""
+        self._area_name = name
+        suffix = _AREA_SENSOR_SUFFIXES[self.entity_description.translation_key or ""]
+        self._attr_name = f"{name} - {suffix}"
+        self._attr_translation_placeholders = {"area_name": name}
 
 
 async def async_setup_area_sensors(
@@ -193,6 +206,8 @@ def _setup_device_area_sensors(
 ) -> None:
     """Create area entities as soon as the first parameter snapshot arrives."""
     known: set[str] = set()
+    names: dict[str, str] = {}
+    entities: dict[str, list[EcovacsAreaSensor]] = {}
 
     def add_area(area_id: str) -> None:
         """Add the fixed set of entities for one area exactly once."""
@@ -200,12 +215,12 @@ def _setup_device_area_sensors(
             return
         known.add(area_id)
         descriptions = area_sensor_descriptions(area_id)
-        async_add_entities(
-            [
-                EcovacsAreaSensor(device, area_id, description)
-                for description in descriptions
-            ]
-        )
+        area_entities = [
+            EcovacsAreaSensor(device, area_id, description, names.get(area_id))
+            for description in descriptions
+        ]
+        entities[area_id] = area_entities
+        async_add_entities(area_entities)
 
     async def on_parameters(event: MowerAreaParameterEvent) -> None:
         """Create entities for every area returned by getAreaParameter."""
@@ -213,9 +228,13 @@ def _setup_device_area_sensors(
             add_area(area.area_id)
 
     async def on_names(event: MowerAreaNameEvent) -> None:
-        """Create entities for areas found by getAreaSet."""
-        for area_id, _ in event.names:
+        """Create entities for areas found by getAreaSet and update existing ones."""
+        for area_id, name in event.names:
+            names[area_id] = name
             add_area(area_id)
+            for entity in entities[area_id]:
+                entity._set_area_name(name)
+                entity.async_write_ha_state()
 
     config_entry.async_on_unload(
         device.events.subscribe(MowerAreaParameterEvent, on_parameters)
