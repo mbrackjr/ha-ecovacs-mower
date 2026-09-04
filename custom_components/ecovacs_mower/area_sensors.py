@@ -117,14 +117,6 @@ def area_sensor_descriptions(
     )
 
 
-_AREA_SENSOR_SUFFIXES = {
-    "area_cutting_height": "Cutting height",
-    "area_mowing_speed": "Mowing speed",
-    "area_obstacle_height": "Obstacle height",
-    "area_cut_direction": "Cutting direction",
-}
-
-
 class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
     """Read one interpreted parameter from one mower area."""
 
@@ -140,12 +132,7 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
         """Initialize entity."""
         super().__init__(device, device.capabilities, description)
         self._area_id = area_id
-        self._area_name = area_name or f"Area {area_id}"
-        # Dynamic entity names cannot rely on translation placeholders alone:
-        # the name event may arrive after HA has registered the entity. Keep the
-        # stable unique_id from the description and update the entity's explicit
-        # name when the mower reports a new friendly name.
-        self._set_area_name(self._area_name)
+        self._set_area_name(area_name or f"Area {area_id}")
         if description.icon:
             self._attr_icon = description.icon
 
@@ -178,10 +165,7 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
         self.async_write_ha_state()
 
     def _set_area_name(self, name: str) -> None:
-        """Set the complete user-facing entity name."""
-        self._area_name = name
-        suffix = _AREA_SENSOR_SUFFIXES[self.entity_description.translation_key or ""]
-        self._attr_name = f"{name} - {suffix}"
+        """Set the translated area-name placeholder."""
         self._attr_translation_placeholders = {"area_name": name}
 
 
@@ -237,10 +221,13 @@ def _setup_device_area_sensors(
                 entity.async_write_ha_state()
 
     config_entry.async_on_unload(
-        device.events.subscribe(MowerAreaParameterEvent, on_parameters)
-    )
-    config_entry.async_on_unload(
         device.events.subscribe(MowerAreaNameEvent, on_names)
     )
-    device.events.request_refresh(MowerAreaParameterEvent)
+    config_entry.async_on_unload(
+        device.events.subscribe(MowerAreaParameterEvent, on_parameters)
+    )
+    # Request names first so that, in the normal startup response order, the
+    # initial entity name already uses the mower's friendly area name. The
+    # parameter response remains the source of truth for which areas exist.
     device.events.request_refresh(MowerAreaNameEvent)
+    device.events.request_refresh(MowerAreaParameterEvent)
