@@ -203,6 +203,7 @@ class GetAreaSet(CustomCommand):
             return HandlingResult.analyse()
 
         areas = _areas_for(event_bus)
+        names_found = False
         for subset in decoded:
             if not isinstance(subset, list) or len(subset) < 3:
                 continue
@@ -212,8 +213,10 @@ class GetAreaSet(CustomCommand):
                 continue
             current = areas.get(area_id, MowerArea(area_id))
             areas[area_id] = replace(current, name=name.strip())
+            names_found = True
 
-        _notify_names(event_bus)
+        if names_found:
+            _notify_names(event_bus)
         return HandlingResult.success()
 
 
