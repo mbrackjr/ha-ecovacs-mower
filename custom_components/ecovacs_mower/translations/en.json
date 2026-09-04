@@ -30,7 +30,7 @@
       "cannot_connect": "Failed to connect",
       "invalid_auth": "Invalid authentication",
       "invalid_verification_code": "That verification code was not accepted",
-      "invalid_url": "Invalid URL",
+      "invalid_url": "URL must start with http:// or https://",
       "invalid_url_schema_override_rest_url": "URL must start with http:// or https://",
       "invalid_url_schema_override_mqtt_url": "URL must start with mqtt:// or mqtts://",
       "unknown": "Unexpected error"
@@ -45,6 +45,34 @@
       "options": {
         "cloud": "Ecovacs cloud",
         "self_hosted": "Self-hosted"
+      }
+    }
+  },
+  "services": {
+    "set_area_parameters": {
+      "name": "Set area parameters",
+      "description": "Set mowing parameters for one mower area. Any omitted parameter keeps its current value.",
+      "fields": {
+        "area_id": {
+          "name": "Area ID",
+          "description": "Numeric area ID from the mower map."
+        },
+        "mow_height_cm": {
+          "name": "Cutting height",
+          "description": "Desired grass height. Leave empty to keep the current value."
+        },
+        "speed_mps": {
+          "name": "Mowing speed",
+          "description": "Desired mowing speed. Leave empty to keep the current value."
+        },
+        "obstacle_max_cm": {
+          "name": "Obstacle height",
+          "description": "Maximum obstacle height considered an obstacle. Leave empty to keep the current value."
+        },
+        "cutting_angle": {
+          "name": "Cutting angle",
+          "description": "Cutting direction in degrees. Leave empty to keep the current value."
+        }
       }
     }
   },
