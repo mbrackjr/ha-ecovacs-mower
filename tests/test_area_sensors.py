@@ -17,40 +17,44 @@ def test_area_sensor_descriptions_have_stable_ids_and_icons() -> None:
         "area_2_obstacle_height",
         "area_2_cut_direction",
     ]
+    assert [description.suggested_object_id for description in descriptions] == [
+        "2_cutting_height",
+        "2_mowing_speed",
+        "2_obstacle_height",
+        "2_cut_direction",
+    ]
     assert [description.icon for description in descriptions] == [
         "mdi:grass",
         "mdi:speedometer",
         "mdi:format-vertical-align-top",
         "mdi:angle-acute",
     ]
-    assert all(description.translation_key for description in descriptions)
+    assert [description.name for description in descriptions] == [
+        "Cutting height",
+        "Mowing speed",
+        "Obstacle height",
+        "Cutting direction",
+    ]
+    assert all(description.translation_key is None for description in descriptions)
 
 
 def test_area_sensor_descriptions_do_not_include_a_name_sensor() -> None:
-    """The mower name is part of each parameter sensor's translated name."""
+    """The mower name is part of each parameter sensor's integration name."""
     from custom_components.ecovacs_mower.area_sensors import area_sensor_descriptions
 
     assert all(
-        description.translation_key != "area_name"
+        description.name != "Area name"
         for description in area_sensor_descriptions("2")
     )
 
 
-def test_area_sensor_uses_translated_name_placeholder() -> None:
-    """The parameter label comes from HA translation, not Python text."""
-    from custom_components.ecovacs_mower.area_sensors import (
-        EcovacsAreaSensor,
-        area_sensor_descriptions,
-    )
+def test_area_sensor_uses_fixed_parameter_names() -> None:
+    """Parameter labels are deliberately fixed English integration names."""
+    from custom_components.ecovacs_mower.area_sensors import area_sensor_descriptions
 
-    # Entity construction is deliberately not exercised here because it needs
-    # a live deebot-client Device. The description proves the translation key
-    # is the source of the parameter label; the entity supplies only the
-    # runtime ``area_name`` placeholder.
-    assert [description.translation_key for description in area_sensor_descriptions("2")] == [
-        "area_cutting_height",
-        "area_mowing_speed",
-        "area_obstacle_height",
-        "area_cut_direction",
+    assert [description.name for description in area_sensor_descriptions("2")] == [
+        "Cutting height",
+        "Mowing speed",
+        "Obstacle height",
+        "Cutting direction",
     ]
-    assert EcovacsAreaSensor is not None
