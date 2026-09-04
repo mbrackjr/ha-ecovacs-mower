@@ -20,6 +20,7 @@ from deebot_client.device import Device
 
 from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
 from homeassistant.const import DEGREE, EntityCategory, UnitOfLength, UnitOfSpeed
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
@@ -41,23 +42,28 @@ class EcovacsAreaSensorEntityDescription(SensorEntityDescription):
     """Mower area sensor entity description."""
 
     value_fn: Callable[[MowerArea], float | int | str | None]
+    parameter_name: str
     suggested_object_id: str | None = None
 
 
 def area_sensor_description(
     area_id: str,
     key_suffix: str,
-    translation_key: str,
+    parameter_name: str,
     value_fn: Callable[[MowerArea], float | int | str | None],
     **kwargs: object,
 ) -> EcovacsAreaSensorEntityDescription:
     """Describe one dynamic sensor for a mower area."""
+    # Keep the area ID in the unique key for stable entity identity, while the
+    # object ID is explicitly kept free of the duplicated ``area_`` prefix that
+    # HA otherwise derives from this dynamic entity description.
     key = f"area_{area_id}_{key_suffix}"
     return EcovacsAreaSensorEntityDescription(
         key=key,
-        translation_key=translation_key,
+        name=parameter_name,
         value_fn=value_fn,
-        suggested_object_id=key,
+        parameter_name=parameter_name,
+        suggested_object_id=key.removeprefix("area_"),
         entity_category=EntityCategory.DIAGNOSTIC,
         **kwargs,
     )
@@ -75,7 +81,7 @@ def area_sensor_descriptions(
         area_sensor_description(
             area_id,
             "cutting_height",
-            "area_cutting_height",
+            "Cutting height",
             lambda area: decode_mow_height(area.mow_height_level)
             if area.mow_height_level is not None
             else None,
@@ -85,7 +91,7 @@ def area_sensor_descriptions(
         area_sensor_description(
             area_id,
             "mowing_speed",
-            "area_mowing_speed",
+            "Mowing speed",
             lambda area: decode_cut_speed(area.cut_mode)
             if area.cut_mode is not None
             else None,
@@ -95,7 +101,7 @@ def area_sensor_descriptions(
         area_sensor_description(
             area_id,
             "obstacle_height",
-            "area_obstacle_height",
+            "Obstacle height",
             lambda area: decode_obstacle_height(area.obstacle_height)
             if area.obstacle_height is not None
             else None,
@@ -105,7 +111,7 @@ def area_sensor_descriptions(
         area_sensor_description(
             area_id,
             "cut_direction",
-            "area_cut_direction",
+            "Cutting direction",
             lambda area: decode_cut_angle(area.angle)
             if area.angle is not None
             else None,
@@ -130,9 +136,36 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
         """Initialize entity."""
         super().__init__(device, device.capabilities, description)
         self._area_id = area_id
-        self._attr_translation_placeholders = {"area_name": area_name}
+        self._set_area_name(area_name)
         if description.icon:
             self._attr_icon = description.icon
+
+    def _set_area_name(self, area_name: str) -> None:
+        """Set the integration-provided name for this area."""
+        # The friendly area name is deliberately part of the integration's
+        # original name. This is the most useful initial name for mower users,
+        # who generally know the area by its app name rather than its numeric ID;
+        # HA users can override the entity name in the entity registry.
+        self._attr_name = f"{area_name} - {self.entity_description.parameter_name}"
+
+    def set_area_name(self, area_name: str) -> None:
+        """Update the integration-provided area name after getAreaSet."""
+        name = f"{area_name} - {self.entity_description.parameter_name}"
+        self._set_area_name(area_name)
+
+        if self.hass is None or self.entity_id is None:
+            return
+
+        registry = er.async_get(self.hass)
+        entry = registry.async_get(self.entity_id)
+        if entry is None:
+            return
+
+        # ``name`` is the user's override. Updating only ``original_name`` means
+        # a user-defined name remains untouched while the integration can follow
+        # a rename made in the mower app on the next getAreaSet response.
+        registry.async_update_entity(self.entity_id, original_name=name)
+        self.async_write_ha_state()
 
     @property
     @override
@@ -175,19 +208,20 @@ def _setup_device_area_sensors(
     config_entry: EcovacsMowerConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Create area entities after the mower has supplied their friendly names."""
+    """Create area entities and keep their names synchronized with getAreaSet."""
     parameters: dict[str, MowerArea] = {}
-    known: set[str] = set()
+    entities: dict[str, list[EcovacsAreaSensor]] = {}
 
     def add_area(area_id: str, area_name: str) -> None:
         """Add the fixed set of entities for one named area exactly once."""
-        if area_id in known:
+        if area_id in entities:
             return
-        known.add(area_id)
+        descriptions = area_sensor_descriptions(area_id)
         area_entities = [
             EcovacsAreaSensor(device, area_id, description, area_name)
-            for description in area_sensor_descriptions(area_id)
+            for description in descriptions
         ]
+        entities[area_id] = area_entities
         async_add_entities(area_entities)
 
         if area := parameters.get(area_id):
@@ -197,17 +231,19 @@ def _setup_device_area_sensors(
     async def on_parameters(event: MowerAreaParameterEvent) -> None:
         """Cache parameter values and update already-created entities."""
         parameters.update({area.area_id: area for area in event.areas})
-        for area_id in parameters:
-            # Names are deliberately required before entity creation. This keeps
-            # the translated entity name's placeholder static for the lifetime
-            # of the entity, as expected by Home Assistant's translation model.
-            if area_id in known:
-                continue
+        for area_id, area in parameters.items():
+            for entity in entities.get(area_id, ()):
+                entity._attr_native_value = entity.entity_description.value_fn(area)
+                entity.async_write_ha_state()
 
     async def on_names(event: MowerAreaNameEvent) -> None:
-        """Create entities once getAreaSet has supplied the friendly names."""
+        """Create entities and update their integration-provided names."""
         for area_id, name in event.names:
-            add_area(area_id, name)
+            if area_id not in entities:
+                add_area(area_id, name)
+            else:
+                for entity in entities[area_id]:
+                    entity.set_area_name(name)
 
     config_entry.async_on_unload(
         device.events.subscribe(MowerAreaNameEvent, on_names)
@@ -216,7 +252,8 @@ def _setup_device_area_sensors(
         device.events.subscribe(MowerAreaParameterEvent, on_parameters)
     )
 
-    # getAreaSet is requested first. Entity creation waits for its response so
-    # the initial translated name can contain the mower's friendly area name.
+    # Both commands are asynchronous MQTT exchanges. Request getAreaSet first
+    # so its response normally creates entities with their final friendly names;
+    # getAreaParameter remains independently responsible for their values.
     device.events.request_refresh(MowerAreaNameEvent)
     device.events.request_refresh(MowerAreaParameterEvent)
