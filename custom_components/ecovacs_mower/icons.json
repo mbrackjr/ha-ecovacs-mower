@@ -1,31 +1,74 @@
 {
   "entity": {
     "binary_sensor": {
-      "animal_protect": { "default": "mdi:paw" },
-      "emergency_stop": { "default": "mdi:alert-octagon" },
-      "fault": { "default": "mdi:alert-circle", "state": { "off": "mdi:check-circle-outline" } },
-      "locked": { "default": "mdi:lock" },
-      "rain_delay": { "default": "mdi:timer-sand" },
-      "rain_protect": { "default": "mdi:weather-rainy", "state": { "off": "mdi:weather-partly-cloudy" } }
+      "animal_protect": {
+        "default": "mdi:paw"
+      },
+      "emergency_stop": {
+        "default": "mdi:alert-octagon"
+      },
+      "fault": {
+        "default": "mdi:alert-circle",
+        "state": {
+          "off": "mdi:check-circle-outline"
+        }
+      },
+      "locked": {
+        "default": "mdi:lock"
+      },
+      "rain_delay": {
+        "default": "mdi:timer-sand"
+      },
+      "rain_protect": {
+        "default": "mdi:weather-rainy",
+        "state": {
+          "off": "mdi:weather-partly-cloudy"
+        }
+      }
     },
     "button": {
-      "clear_fault": { "default": "mdi:alert-circle-check-outline" },
-      "play_sound": { "default": "mdi:map-marker-radius" },
-      "reset_lifespan_blade": { "default": "mdi:saw-blade" },
-      "reset_lifespan_lens_brush": { "default": "mdi:broom" },
-      "reset_lifespan_trimmer_brush": { "default": "mdi:brush" },
-      "reset_lifespan_weed_rope": { "default": "mdi:string-lights" }
+      "clear_fault": {
+        "default": "mdi:alert-circle-check-outline"
+      },
+      "play_sound": {
+        "default": "mdi:map-marker-radius"
+      },
+      "reset_lifespan_blade": {
+        "default": "mdi:saw-blade"
+      },
+      "reset_lifespan_lens_brush": {
+        "default": "mdi:broom"
+      },
+      "reset_lifespan_trimmer_brush": {
+        "default": "mdi:brush"
+      },
+      "reset_lifespan_weed_rope": {
+        "default": "mdi:string-lights"
+      }
     },
     "event": {
-      "last_job": { "default": "mdi:history" }
+      "last_job": {
+        "default": "mdi:history"
+      }
     },
     "image": {
-      "map": { "default": "mdi:map" }
+      "map": {
+        "default": "mdi:map"
+      }
     },
     "number": {
-      "cut_direction": { "default": "mdi:angle-acute" },
-      "rain_delay": { "default": "mdi:timer-sand" },
-      "volume": { "default": "mdi:volume-high", "state": { "0": "mdi:volume-off" } }
+      "cut_direction": {
+        "default": "mdi:angle-acute"
+      },
+      "rain_delay": {
+        "default": "mdi:timer-sand"
+      },
+      "volume": {
+        "default": "mdi:volume-high",
+        "state": {
+          "0": "mdi:volume-off"
+        }
+      }
     },
     "sensor": {
       "activity": {
@@ -37,36 +80,92 @@
           "returning_rain": "mdi:weather-pouring"
         }
       },
-      "beacon": { "default": "mdi:map-marker-radius" },
-      "error": { "default": "mdi:alert-circle" },
-      "lifespan_blade": { "default": "mdi:saw-blade" },
-      "lifespan_lens_brush": { "default": "mdi:broom" },
-      "lifespan_trimmer_brush": { "default": "mdi:brush" },
-      "lifespan_weed_rope": { "default": "mdi:string-lights" },
-      "mowing_progress": { "default": "mdi:progress-check" },
-      "network_ip": { "default": "mdi:ip-network-outline" },
-      "network_rssi": { "default": "mdi:signal-variant" },
-      "network_ssid": { "default": "mdi:wifi" },
-      "stats_area": { "default": "mdi:floor-plan" },
-      "stats_time": { "default": "mdi:timer-outline" },
-      "total_stats_area": { "default": "mdi:floor-plan" },
-      "total_stats_cleanings": { "default": "mdi:counter" },
-      "total_stats_time": { "default": "mdi:timer-outline" },
-      "area_cutting_height": { "default": "mdi:grass" },
-      "area_mowing_speed": { "default": "mdi:speedometer" },
-      "area_obstacle_height": { "default": "mdi:format-vertical-align-top" },
-      "area_cut_direction": { "default": "mdi:angle-acute" },
-      "area_name": { "default": "mdi:map-marker" }
+      "beacon": {
+        "default": "mdi:map-marker-radius"
+      },
+      "error": {
+        "default": "mdi:alert-circle"
+      },
+      "lifespan_blade": {
+        "default": "mdi:saw-blade"
+      },
+      "lifespan_lens_brush": {
+        "default": "mdi:broom"
+      },
+      "lifespan_trimmer_brush": {
+        "default": "mdi:brush"
+      },
+      "lifespan_weed_rope": {
+        "default": "mdi:string-lights"
+      },
+      "mowing_progress": {
+        "default": "mdi:progress-check"
+      },
+      "network_ip": {
+        "default": "mdi:ip-network-outline"
+      },
+      "network_rssi": {
+        "default": "mdi:signal-variant"
+      },
+      "network_ssid": {
+        "default": "mdi:wifi"
+      },
+      "stats_area": {
+        "default": "mdi:floor-plan"
+      },
+      "stats_time": {
+        "default": "mdi:timer-outline"
+      },
+      "total_stats_area": {
+        "default": "mdi:floor-plan"
+      },
+      "total_stats_cleanings": {
+        "default": "mdi:counter"
+      },
+      "total_stats_time": {
+        "default": "mdi:timer-outline"
+      },
+      "area_cutting_height": {
+        "default": "mdi:grass"
+      },
+      "area_mowing_speed": {
+        "default": "mdi:speedometer"
+      },
+      "area_obstacle_height": {
+        "default": "mdi:format-vertical-align-top"
+      },
+      "area_cut_direction": {
+        "default": "mdi:angle-acute"
+      },
+      "area_name": {
+        "default": "mdi:map-marker"
+      }
     },
     "switch": {
-      "advanced_mode": { "default": "mdi:tune" },
-      "border_switch": { "default": "mdi:land-fields" },
-      "child_lock": { "default": "mdi:teddy-bear" },
-      "cross_map_border_warning": { "default": "mdi:border-none-variant" },
-      "move_up_warning": { "default": "mdi:arrow-up-bold-box-outline" },
-      "rain_detection": { "default": "mdi:weather-rainy" },
-      "safe_protect": { "default": "mdi:shield-half-full" },
-      "true_detect": { "default": "mdi:laser-pointer" }
+      "advanced_mode": {
+        "default": "mdi:tune"
+      },
+      "border_switch": {
+        "default": "mdi:land-fields"
+      },
+      "child_lock": {
+        "default": "mdi:teddy-bear"
+      },
+      "cross_map_border_warning": {
+        "default": "mdi:border-none-variant"
+      },
+      "move_up_warning": {
+        "default": "mdi:arrow-up-bold-box-outline"
+      },
+      "rain_detection": {
+        "default": "mdi:weather-rainy"
+      },
+      "safe_protect": {
+        "default": "mdi:shield-half-full"
+      },
+      "true_detect": {
+        "default": "mdi:laser-pointer"
+      }
     }
   }
 }
