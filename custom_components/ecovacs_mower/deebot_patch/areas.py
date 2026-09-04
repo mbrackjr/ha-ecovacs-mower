@@ -8,16 +8,15 @@ The A1600 LiDAR Pro findings that established the mappings live in issue #11.
 They are deliberately scoped to that model here: the values have not been
 verified on the other mower classes supported by this integration.
 
-The area name is a separate response from ``getAreaSet``. The name parsing is
-based on the observation documented in DeebotUniverse/client.py#1596 and
-#1684: an ``ar`` response contains chunked LZMA/base64 data whose decoded rows
-start with map ID, area ID and the user-editable name. This path is kept as a
-best-effort test surface because it has not been confirmed on the A1600 LiDAR
-Pro.
+The area name is a separate response from ``getAreaSet``. Its ``ar`` response
+contains chunked Base64/LZMA data whose decoded rows start with map ID, area ID
+and the user-editable name. The decompressor is supplied by deebot-client; the
+patch only adds the missing command and mower-specific row interpretation.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, replace
 import logging
 from typing import TYPE_CHECKING, Any
@@ -27,8 +26,7 @@ import orjson
 from deebot_client.commands.json.custom import CustomCommand
 from deebot_client.events.base import Event
 from deebot_client.message import HandlingResult
-
-from .geometry import FragmentBuffer
+from deebot_client.rs.util import decompress_base64_data
 
 if TYPE_CHECKING:
     from deebot_client.event_bus import EventBus
@@ -79,15 +77,13 @@ def _notify_parameters(event_bus: EventBus) -> None:
 
 def _notify_names(event_bus: EventBus) -> None:
     """Publish the current area names."""
-    event_bus.notify(
-        MowerAreaNameEvent(
-            tuple(
-                (area_id, area.name)
-                for area_id, area in _areas_for(event_bus).items()
-                if area.name is not None
-            )
-        )
+    names = tuple(
+        (area_id, area.name)
+        for area_id, area in _areas_for(event_bus).items()
+        if area.name is not None
     )
+    if names:
+        event_bus.notify(MowerAreaNameEvent(names))
 
 
 def _as_int(value: Any) -> int | None:
@@ -149,15 +145,42 @@ class GetAreaParameter(CustomCommand):
         return HandlingResult.success()
 
 
+class _AreaSetFragmentBuffer:
+    """Reassemble multipart area-set data using deebot-client's decoder."""
+
+    def __init__(self, max_batches: int = 16) -> None:
+        """Create a bounded fragment buffer."""
+        self._batches: OrderedDict[str, dict[int, str]] = OrderedDict()
+        self._max_batches = max_batches
+
+    def add(
+        self, batid: str, index: int, fragment: str, info_size: int
+    ) -> bytes | None:
+        """Add a fragment; return decoded data once complete."""
+        parts = self._batches.setdefault(batid, {})
+        self._batches.move_to_end(batid)
+        parts[index] = fragment
+        while len(self._batches) > self._max_batches:
+            self._batches.popitem(last=False)
+
+        joined = "".join(parts[i] for i in sorted(parts))
+        try:
+            blob = decompress_base64_data(joined)
+        except (ValueError, RuntimeError):
+            return None
+        if len(blob) != info_size:
+            return None
+        del self._batches[batid]
+        return blob
+
+
 class GetAreaSet(CustomCommand):
     """Read user-defined mower area names from the ``ar`` area set.
 
-    ``getAreaSet`` is not modelled by deebot-client. The response uses the same
-    chunked LZMA/base64 encoding as the mower map messages. For ``ar`` the
-    decoded rows are documented in DeebotUniverse/client.py#1684 as
+    ``getAreaSet`` is not modelled by deebot-client. The response uses the
+    chunked Base64/LZMA decoder already provided by the pinned deebot-client
+    18.5.1 release. For ``ar`` the decoded rows are documented upstream as
     ``mapID | areaID | name | neighbourIDs | 2 reference coordinates | flags``.
-    This has not been confirmed on the A1600 LiDAR Pro, so malformed or
-    unsupported responses are ignored rather than affecting area parameters.
     """
 
     NAME = "getAreaSet"
@@ -165,7 +188,7 @@ class GetAreaSet(CustomCommand):
     def __init__(self) -> None:
         """Build a request for mowing areas (``ar``)."""
         super().__init__(self.NAME, {"type": "ar"})
-        self._buffer = FragmentBuffer()
+        self._buffer = _AreaSetFragmentBuffer()
 
     def _handle_response(
         self, event_bus: EventBus, response: dict[str, Any]
@@ -184,12 +207,13 @@ class GetAreaSet(CustomCommand):
         if not isinstance(info, str):
             return HandlingResult.analyse()
 
-        blob = self._buffer.add(
-            str(data.get("batid", "")),
-            int(data.get("index", 0)),
-            info,
-            int(data.get("infoSize", -1)),
-        )
+        try:
+            index = int(data.get("index", 0))
+            info_size = int(data.get("infoSize", -1))
+        except (TypeError, ValueError):
+            return HandlingResult.analyse()
+
+        blob = self._buffer.add(str(data.get("batid", "")), index, info, info_size)
         if blob is None:
             return HandlingResult.success()
 
