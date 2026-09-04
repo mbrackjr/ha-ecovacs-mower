@@ -90,6 +90,7 @@ def test_every_description_has_a_translation() -> None:
         EcovacsErrorSensor,
         EcovacsMowingProgressSensor,
         beacon_entity_description,
+        area_sensor_descriptions,
     )
 
     root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"
@@ -106,6 +107,7 @@ def test_every_description_has_a_translation() -> None:
         # serial yields the same translation key, which is what these three
         # tests check.
         beacon_entity_description("EXAMPLE"),
+        *area_sensor_descriptions("EXAMPLE"),
     )
     for description in descriptions:
         if description.translation_key:
@@ -130,6 +132,7 @@ def test_every_sensor_has_an_icon() -> None:
         EcovacsErrorSensor,
         EcovacsMowingProgressSensor,
         beacon_entity_description,
+        area_sensor_descriptions,
     )
 
     root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"
@@ -146,6 +149,7 @@ def test_every_sensor_has_an_icon() -> None:
         # serial yields the same translation key, which is what these three
         # tests check.
         beacon_entity_description("EXAMPLE"),
+        *area_sensor_descriptions("EXAMPLE"),
     )
     for description in descriptions:
         if description.translation_key:
@@ -169,6 +173,7 @@ def test_no_stale_sensor_translations_or_icons() -> None:
         EcovacsErrorSensor,
         EcovacsMowingProgressSensor,
         beacon_entity_description,
+        area_sensor_descriptions,
     )
 
     root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"
@@ -185,6 +190,7 @@ def test_no_stale_sensor_translations_or_icons() -> None:
         # serial yields the same translation key, which is what these three
         # tests check.
         beacon_entity_description("EXAMPLE"),
+        *area_sensor_descriptions("EXAMPLE"),
     )
     keys = {d.translation_key for d in descriptions if d.translation_key}
 
