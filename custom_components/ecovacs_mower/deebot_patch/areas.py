@@ -242,7 +242,7 @@ def decode_cut_speed(level: int) -> float | None:
     """
     if level not in range(1, 8):
         return None
-    return 0.40 + 0.05 * (7 - level)
+    return round(0.40 + 0.05 * (7 - level), 2)
 
 
 def decode_obstacle_height(level: int) -> int | None:
