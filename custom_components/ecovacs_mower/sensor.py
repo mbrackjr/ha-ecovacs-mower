@@ -76,6 +76,7 @@ from .deebot_patch.messages import (
     MowerStatsEvent,
     MowerTriggerEvent,
 )
+from .area_sensors import async_setup_area_sensors
 from .entity import (
     EcovacsCapabilityEntityDescription,
     EcovacsDescriptionEntity,
@@ -361,6 +362,7 @@ async def async_setup_entry(
             continue
         _async_setup_beacons(device, config_entry, async_add_entities)
 
+    await async_setup_area_sensors(config_entry, async_add_entities)
     async_add_entities(entities)
 
 
