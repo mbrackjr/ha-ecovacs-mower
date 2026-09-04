@@ -15,10 +15,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, override
 
+from deebot_client.capabilities import DeviceType
 from deebot_client.device import Device
-from deebot_client.events.base import Event
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription
+from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
 from homeassistant.const import DEGREE, EntityCategory, UnitOfLength, UnitOfSpeed
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -101,7 +101,9 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
 
     async def _on_names(self, event: MowerAreaNameEvent) -> None:
         """Update this area's friendly name without changing its value."""
-        name = next((name for area_id, name in event.names if area_id == self._area_id), None)
+        name = next(
+            (name for area_id, name in event.names if area_id == self._area_id), None
+        )
         if name is None:
             return
         self._attr_translation_placeholders = {"area_name": name}
@@ -146,7 +148,9 @@ class EcovacsAreaNameSensor(EcovacsDescriptionEntity, SensorEntity):
 
     async def _on_names(self, event: MowerAreaNameEvent) -> None:
         """Publish the user-defined name when getAreaSet supplies it."""
-        name = next((name for area_id, name in event.names if area_id == self._area_id), None)
+        name = next(
+            (name for area_id, name in event.names if area_id == self._area_id), None
+        )
         if name is None:
             return
         self._attr_native_value = name
@@ -161,7 +165,7 @@ async def async_setup_area_sensors(
     """Add read-only area sensors for verified mower hardware."""
     controller = config_entry.runtime_data
     for device in controller.devices:
-        if device.capabilities.device_type.value != "mower":
+        if device.capabilities.device_type is not DeviceType.MOWER:
             continue
         if device.device_info["class"] not in AREA_PARAMETER_CLASSES:
             continue
@@ -252,4 +256,6 @@ def _setup_device_area_sensors(
     config_entry.async_on_unload(
         device.events.subscribe(MowerAreaParameterEvent, on_parameters)
     )
-    config_entry.async_on_unload(device.events.subscribe(MowerAreaNameEvent, on_names))
+    config_entry.async_on_unload(
+        device.events.subscribe(MowerAreaNameEvent, on_names)
+    )
