@@ -102,6 +102,9 @@ def test_every_description_has_a_translation() -> None:
         EcovacsErrorSensor.entity_description,
         EcovacsActivitySensor.entity_description,
         EcovacsMowingProgressSensor.entity_description,
+        # Built per beacon at runtime, so there is no tuple to splat. Every
+        # serial yields the same translation key, which is what these three
+        # tests check.
         beacon_entity_description("EXAMPLE"),
     )
     for description in descriptions:
@@ -139,6 +142,9 @@ def test_every_sensor_has_an_icon() -> None:
         EcovacsErrorSensor.entity_description,
         EcovacsActivitySensor.entity_description,
         EcovacsMowingProgressSensor.entity_description,
+        # Built per beacon at runtime, so there is no tuple to splat. Every
+        # serial yields the same translation key, which is what these three
+        # tests check.
         beacon_entity_description("EXAMPLE"),
     )
     for description in descriptions:
@@ -175,6 +181,9 @@ def test_no_stale_sensor_translations_or_icons() -> None:
         EcovacsErrorSensor.entity_description,
         EcovacsActivitySensor.entity_description,
         EcovacsMowingProgressSensor.entity_description,
+        # Built per beacon at runtime, so there is no tuple to splat. Every
+        # serial yields the same translation key, which is what these three
+        # tests check.
         beacon_entity_description("EXAMPLE"),
     )
     keys = {d.translation_key for d in descriptions if d.translation_key}
@@ -693,6 +702,8 @@ def test_error_description_prefers_the_library_and_fills_its_gaps(caplog) -> Non
 
     from deebot_client.const import ERROR_CODES
 
+    # In errors.py rather than sensor.py since issue #53: the fault latch reads
+    # the same table, so it moved out to a module that imports no HA.
     from custom_components.ecovacs_mower.errors import (
         MOWER_ERROR_CODES,
         _UNKNOWN_CODES_REPORTED,
@@ -701,7 +712,12 @@ def test_error_description_prefers_the_library_and_fills_its_gaps(caplog) -> Non
 
     caplog.set_level(logging.WARNING, logger="custom_components.ecovacs_mower.errors")
 
+    # A code the library knows keeps the library's wording, even if this table
+    # were ever to grow an entry for it.
     assert error_description(101, ERROR_CODES[101]) == ERROR_CODES[101]
+
+    # No overlap: an entry here that the library also has is a disagreement
+    # nobody would notice, since the branch above means it is never read.
     assert not set(MOWER_ERROR_CODES) & set(ERROR_CODES)
 
     assert error_description(422, None) == MOWER_ERROR_CODES[422]
@@ -713,6 +729,7 @@ def test_error_description_prefers_the_library_and_fills_its_gaps(caplog) -> Non
         assert "9999" in caplog.text
         assert "issues/37" in caplog.text
 
+        # Asked once, not on every push for as long as the condition lasts.
         caplog.clear()
         assert error_description(9999, None) is None
         assert not caplog.text
@@ -721,7 +738,20 @@ def test_error_description_prefers_the_library_and_fills_its_gaps(caplog) -> Non
 
 
 async def test_a_job_ending_away_from_the_dock_leaves_the_reading_standing() -> None:
-    """The inverse of what issue #55 asked for, and deliberate (issue #73)."""
+    """The inverse of what issue #55 asked for, and deliberate (issue #73).
+
+    #55 wanted every way a job can end to clear the reading: a fault out on
+    the lawn reaches ERROR and never DOCKED, and a plain stop pushes an idle.
+    Clearing on those edges is what also cleared a charge break, because the
+    two are indistinguishable from the state alone.
+
+    So the reading now stands until the next job's start bury point clears it,
+    and 93 % is understood as "the last job got to 93 %". The accepted cost is
+    a stale-looking percentage between jobs on a firmware whose stats never
+    zero — a percentage that is at least true of a real job, unlike the 0 % or
+    100 % a re-read of that firmware's payload would produce. What still stops
+    the payload being re-read is the trusted-state gate, tested below.
+    """
     from deebot_client.models import State
 
     for state in (State.ERROR, State.IDLE):
@@ -735,6 +765,11 @@ async def test_a_job_ending_away_from_the_dock_leaves_the_reading_standing() -> 
 
 
 async def test_a_stats_answer_after_a_job_ended_away_from_the_dock_is_ignored() -> None:
+    # The push keeps arriving for a while after the job stops on some
+    # firmware. Nothing clears the reading on these edges any more (#73), so
+    # the gate is the only thing stopping the ended job's numbers — or a 0 % on
+    # the firmware that does zero them — being written over the figure that
+    # stands.
     from deebot_client.models import State
 
     for state in (State.ERROR, State.IDLE):
@@ -747,6 +782,10 @@ async def test_a_stats_answer_after_a_job_ended_away_from_the_dock_is_ignored() 
 
 
 async def test_the_trusted_states_still_report() -> None:
+    # The gate is inverted; make sure it did not invert too far. This one no
+    # longer distinguishes the two versions of the gate — CLEANING and PAUSED
+    # were trusted before issue #73 as well. Dropping RETURNING is pinned by
+    # test_the_drive_home_is_not_trusted below.
     from deebot_client.models import State
 
     for state in (State.CLEANING, State.PAUSED):
@@ -759,7 +798,14 @@ async def test_the_trusted_states_still_report() -> None:
 
 
 async def test_the_drive_home_is_not_trusted() -> None:
-    """RETURNING is a state a job runs in, and its telemetry is still worthless."""
+    """RETURNING is a state a job runs in, and its telemetry is still worthless.
+
+    Measured on the captured run (issue #73): the completion wrote 100 % at
+    13:42:30, RETURNING arrived 2.7 s later, and the tick's getStats answered
+    {"area": 0, "time": 0, "mowedArea": 0} at 13:43:12 — the firmware zeroes
+    the stats once the job is over. Trusting RETURNING erased the completion 42
+    seconds after it was published.
+    """
     from deebot_client.models import State
 
     sensor = _bare_progress_sensor()
@@ -772,6 +818,14 @@ async def test_the_drive_home_is_not_trusted() -> None:
 
 
 async def test_an_unchanged_percentage_is_not_written_again() -> None:
+    """onStats arrives about twice a second; whole percents do not (issue #55).
+
+    On the captured O800 RTK job one percent is 2089 cm2 and a push moves a few
+    hundred, so most pushes round to the number already showing. HA's state
+    machine already short-circuits an unchanged write with no recorder row, so
+    the guard is not about rows — it saves the state-machine round trip itself,
+    roughly five times a second the entity has nothing new to report.
+    """
     from unittest.mock import Mock
 
     from deebot_client.models import State
@@ -780,6 +834,7 @@ async def test_an_unchanged_percentage_is_not_written_again() -> None:
     sensor._last_state = State.CLEANING
     sensor.async_write_ha_state = Mock()
 
+    # Three consecutive pushes from the issue #56 log, all 50% of 208900.
     for mowed in (104500, 104550, 105000):
         await sensor._on_stats(_job(208900, mowed))
 
@@ -829,7 +884,12 @@ def _beacon_mower(class_: str = "77atlz", did: str = "did-beacon"):
 
 
 async def _set_up_beacons(device):
-    """Run the platform for *device* and return the added list and the callback."""
+    """Run the platform for *device* and return the added list and the callback.
+
+    The beacons are not known at setup time — the count comes out of the first
+    getLifeSpan answer — so what the platform installs is a subscription, and
+    the entities appear when it fires.
+    """
     from unittest.mock import MagicMock, patch
 
     from custom_components.ecovacs_mower.deebot_patch.messages import MowerBeaconsEvent
@@ -864,6 +924,7 @@ async def test_no_beacon_sensor_exists_before_the_device_has_answered() -> None:
 
 
 async def test_a_beacon_sensor_appears_for_every_serial_reported() -> None:
+    # The real answer in issue #40 carried four, one of them flat.
     added, on_beacons = await _set_up_beacons(_beacon_mower())
 
     await on_beacons(_beacons(("A1", 0.0), ("A2", 83.0), ("A3", 68.0), ("A4", 73.0)))
@@ -877,6 +938,7 @@ async def test_a_beacon_sensor_appears_for_every_serial_reported() -> None:
 
 
 async def test_a_serial_already_known_does_not_get_a_second_entity() -> None:
+    # getLifeSpan is polled, so the same set arrives over and over.
     added, on_beacons = await _set_up_beacons(_beacon_mower())
 
     await on_beacons(_beacons(("A1", 83.0)))
@@ -896,7 +958,12 @@ async def test_a_beacon_added_later_gets_its_own_entity() -> None:
 
 
 async def test_the_beacon_unique_id_carries_the_serial() -> None:
-    """Four beacons on one device need four ids, and the serial is the only key."""
+    """Four beacons on one device need four ids, and the serial is the only key.
+
+    The payload has no index and no guaranteed order, so numbering them by
+    arrival would reshuffle the entities the day an answer comes back in a
+    different order.
+    """
     added, on_beacons = await _set_up_beacons(_beacon_mower(did="did-x"))
 
     await on_beacons(_beacons(("A1", 83.0), ("A2", 68.0)))
@@ -952,7 +1019,12 @@ async def test_a_beacon_sensor_reads_only_its_own_serial() -> None:
 
 
 async def test_a_beacon_missing_from_a_later_answer_goes_unknown() -> None:
-    """A swapped-out beacon must not sit there showing the dead cell's charge."""
+    """A swapped-out beacon must not sit there showing the dead cell's charge.
+
+    The device simply stops listing it. Keeping the last value would leave a
+    ghost at 0 % that nothing can ever clear, and a low-battery automation
+    firing on a beacon that is no longer on the lawn.
+    """
     sensor = _bare_beacon_sensor("A2")
 
     await sensor._on_beacons(_beacons(("A2", 83.0)))
@@ -991,7 +1063,12 @@ def _edge(phase: str, trigger: str, mowed: float | None = None, work: float | No
 
 
 async def test_a_charge_break_leaves_the_reading_standing() -> None:
-    """Issue #73. A job that pauses to charge is not a job that has finished."""
+    """Issue #73. A job that pauses to charge is not a job that has finished.
+
+    The captured run reached 55 %, docked at 10:54 with the plan unfinished and
+    resumed the same jobId at 12:08. Clearing on the way out of a job state
+    spent those 74 minutes at unknown.
+    """
     from deebot_client.models import State
 
     sensor = _bare_progress_sensor()
@@ -1005,7 +1082,14 @@ async def test_a_charge_break_leaves_the_reading_standing() -> None:
 
 
 async def test_a_resume_does_not_clear_the_reading() -> None:
-    """_on_state must not clear on the strength of the state alone."""
+    """_on_state must not clear on the strength of the state alone.
+
+    A guard rather than a demonstration: master did not clear on entering a
+    job state either, so this passes on both sides of issue #73. What it pins
+    is that the clear the CLEANING edge *does* now perform stays gated on
+    ``_job_over`` — both a rain pause and a charge break come back through
+    CLEANING, and an ungated clear would blip the sensor to unknown every time.
+    """
     from deebot_client.models import State
 
     for previous in (State.PAUSED, State.DOCKED):
@@ -1019,7 +1103,14 @@ async def test_a_resume_does_not_clear_the_reading() -> None:
 
 
 async def test_a_new_job_clears_the_reading() -> None:
-    """A start announcement clears a finished job's figure, issue #73."""
+    """A start announcement clears a finished job's figure, issue #73.
+
+    Driven as the pair it really is — the completion that sets the latch, then
+    the start that acts on it — because the start alone is not enough to know
+    the figure is stale. The CLEANING edge does the same thing when it gets
+    there first; this is the path for a class whose parking push was dropped,
+    where the announcement is the only signal.
+    """
     for trigger in ("schedule", "app"):
         sensor = _bare_progress_sensor()
         await sensor._on_job_edge(
@@ -1035,6 +1126,10 @@ async def test_a_new_job_clears_the_reading() -> None:
 async def test_a_start_does_not_clear_a_reading_from_its_own_job() -> None:
     """The announcement lands 13 seconds in, by which time a pushing class has
     already reported the new job's own progress.
+
+    Clearing unconditionally wiped that legitimate reading for the half second
+    until the next push. The latch is what distinguishes the two: here nothing
+    has ended, so there is nothing to clear.
     """
     sensor = _bare_progress_sensor()
     sensor._attr_native_value = 2
@@ -1045,6 +1140,12 @@ async def test_a_start_does_not_clear_a_reading_from_its_own_job() -> None:
 
 
 async def test_a_reborn_start_does_not_clear_the_reading() -> None:
+    """reborn arrived seven times in twelve minutes on one run (2px96q).
+
+    Each carried a fresh jobId, which is why job identity is no better a
+    signal than the trigger here. Clearing on it would wipe the reading
+    repeatedly mid-job.
+    """
     sensor = _bare_progress_sensor()
     sensor._attr_native_value = 42
 
@@ -1054,6 +1155,7 @@ async def test_a_reborn_start_does_not_clear_the_reading() -> None:
 
 
 async def test_a_completion_writes_the_final_percentage() -> None:
+    """The tick's last poll landed on 96 %; the completion carries the rest."""
     sensor = _bare_progress_sensor()
     sensor._attr_native_value = 96
 
@@ -1065,6 +1167,13 @@ async def test_a_completion_writes_the_final_percentage() -> None:
 
 
 async def test_a_zone_completion_writes_its_own_percentage() -> None:
+    """A completion is not always 100 %.
+
+    A zone's workArea is the polygon's estimate, and the captured zone job
+    finished at 24.287498 of 32.162498 m². Writing a hard 100 there would be a
+    lie, and would make the scheduled job's exact equality indistinguishable
+    from a fabricated one.
+    """
     sensor = _bare_progress_sensor()
 
     await sensor._on_job_edge(
@@ -1075,6 +1184,7 @@ async def test_a_zone_completion_writes_its_own_percentage() -> None:
 
 
 async def test_a_manually_stopped_job_writes_nothing() -> None:
+    """mow-schedule-stop carries trigger app as often as workComplete."""
     sensor = _bare_progress_sensor()
     sensor._attr_native_value = 42
 
@@ -1084,6 +1194,14 @@ async def test_a_manually_stopped_job_writes_nothing() -> None:
 
 
 async def test_a_zeroed_answer_on_the_way_home_does_not_erase_a_completion() -> None:
+    """Issue #73. RETURNING is why the completion needed 42 seconds to survive.
+
+    The observed sequence: the completion writes 100 at 13:42:30, the mower
+    enters RETURNING two seconds later, and the tick's getStats answers
+    {"area": 0, "mowedArea": 0} at 13:43:12 because the firmware zeroes the
+    stats once the job is over. With RETURNING in the trusted set that answer
+    overwrote the reading with None.
+    """
     from deebot_client.models import State
 
     sensor = _bare_progress_sensor()
@@ -1096,6 +1214,13 @@ async def test_a_zeroed_answer_on_the_way_home_does_not_erase_a_completion() -> 
 
 
 async def test_an_unregistered_phase_writes_nothing() -> None:
+    """The pause and resume edges are meant to be one subclass each to add.
+
+    Their payloads carry the same fields, and a pause's trigger vocabulary
+    (lowBattery, alert, rain) does not overlap workComplete today — but leaning
+    on "not a start means a stop" would make a future pause that does carry it
+    publish a final value halfway through a job.
+    """
     sensor = _bare_progress_sensor()
     sensor._attr_native_value = 55
 
@@ -1107,6 +1232,18 @@ async def test_an_unregistered_phase_writes_nothing() -> None:
 
 
 async def test_the_captured_run_ends_at_a_hundred_and_stays_there() -> None:
+    """The whole of issue #73 in one sequence, replayed through a real bus.
+
+    Timings and payloads from the GOAT O1200 run on 2026-08-28. Before this
+    change the reading went to unknown at 13:42:30 and stayed there; the two
+    failure modes it replaces are the charge break earlier in the same run and
+    this ending.
+
+    Three things have to line up for the last assertion to hold: the state
+    edges must not clear, the completion must be written although the mower is
+    already IDLE by the time it arrives, and the zeroed getStats that lands 42
+    seconds later while RETURNING must be refused.
+    """
     import asyncio
     from unittest.mock import AsyncMock, Mock
 
@@ -1128,16 +1265,19 @@ async def test_the_captured_run_ends_at_a_hundred_and_stays_there() -> None:
     bus.subscribe(MowerStatsEvent, sensor._on_stats)
     bus.subscribe(MowerJobEdgeEvent, sensor._on_job_edge)
 
+    # 09:00:01 the job starts, and the tick reports it climbing.
     bus.notify(StateEvent(State.CLEANING))
     await asyncio.sleep(0)
     bus.notify(MowerStatsEvent(area=3205675, mowed_area=3077448))
     await asyncio.sleep(0)
     assert sensor._attr_native_value == 96
 
+    # 13:42:30.066 the mower reports idle, 0.26 s before saying why.
     bus.notify(StateEvent(State.IDLE))
     await asyncio.sleep(0)
     assert sensor._attr_native_value == 96
 
+    # 13:42:30.328 the completion, verbatim from the log.
     OnMowScheduleStop._handle_body(
         bus,
         {
@@ -1153,11 +1293,13 @@ async def test_the_captured_run_ends_at_a_hundred_and_stays_there() -> None:
     await asyncio.sleep(0)
     assert sensor._attr_native_value == 100
 
+    # 13:42:32.817 turning for the dock, 13:43:12.113 the zeroed answer.
     bus.notify(StateEvent(State.RETURNING))
     await asyncio.sleep(0)
     bus.notify(MowerStatsEvent(area=0, mowed_area=0))
     await asyncio.sleep(0)
 
+    # 13:44:51.853 docked.
     bus.notify(StateEvent(State.DOCKED))
     await asyncio.sleep(0)
 
@@ -1165,6 +1307,14 @@ async def test_the_captured_run_ends_at_a_hundred_and_stays_there() -> None:
 
 
 async def test_a_completion_without_readable_areas_leaves_the_reading_alone() -> None:
+    """Clearing on a completion is the one thing this must never do (issue #73).
+
+    Every capture across both families and three firmwares carries the pair as
+    floats, so this is a guard rather than an observed case — but the failure it
+    guards against is the exact behaviour the change exists to remove. A
+    completion whose areas cannot be read is a completion nobody can put a
+    number on, not a job at zero percent.
+    """
     sensor = _bare_progress_sensor()
     sensor._attr_native_value = 96
 
@@ -1176,6 +1326,19 @@ async def test_a_completion_without_readable_areas_leaves_the_reading_alone() ->
 
 
 async def test_a_completion_survives_a_dropped_state_push() -> None:
+    """The completion has to be latched, not merely written (issue #73).
+
+    Firmware 1.13.10 drops state pushes — const.py records a run that finished,
+    drove home and started charging without sending one — so ``_last_state``
+    can still be CLEANING when the completion arrives. The controller's tick
+    then refreshes StateEvent and StatsEvent as two independent tasks, and the
+    stats answer is one round trip against MowerStateRefresh's two, so the
+    zeroed answer lands first, while CLEANING is still trusted.
+
+    Without the latch that answer erased the completion 42 seconds after it was
+    published: the exact failure of issue #73, reached through a door the
+    trusted-state set cannot close.
+    """
     from deebot_client.models import State
 
     sensor = _bare_progress_sensor()
@@ -1192,6 +1355,14 @@ async def test_a_completion_survives_a_dropped_state_push() -> None:
 
 
 async def test_a_completion_survives_a_paused_plan_before_the_dock() -> None:
+    """The other door, and the reason PAUSED could not just be trusted.
+
+    Between the completion and DOCKED — 2 m 21 s on the captured run — the
+    docked record is false, because handle_clean_info moved it on RETURNING. A
+    stale paused-plan clean-info in that window is therefore not suppressed,
+    ``_last_state`` becomes PAUSED, and the one poll answer known to land there
+    is the zeroed one.
+    """
     from deebot_client.models import State
 
     sensor = _bare_progress_sensor()
@@ -1207,6 +1378,15 @@ async def test_a_completion_survives_a_paused_plan_before_the_dock() -> None:
 
 
 async def test_a_finished_figure_is_cleared_when_cutting_starts_again() -> None:
+    """A new job must not open showing the last job's completion.
+
+    The start bury point arrives 13 seconds into a run, and on a class that
+    never sends it at all it never arrives. Meanwhile the CLEANING edge's own
+    refresh answers zeros, which the bus dedupes away — so without this the
+    reading held 100 % into a job that had just started, which is a worse lie
+    than unknown. The latch is what makes the edge safe to act on: it fires
+    only when the standing figure belongs to a job that is over.
+    """
     from deebot_client.models import State
 
     sensor = _bare_progress_sensor()
@@ -1221,6 +1401,12 @@ async def test_a_finished_figure_is_cleared_when_cutting_starts_again() -> None:
 
 
 async def test_a_charge_break_resume_is_not_a_new_job() -> None:
+    """The latch is set by a stop, and a lowBattery pause is not a stop.
+
+    This is what keeps the clear above from firing on a resume. The captured
+    charge break published mow-schedule-pause and then mow-schedule-resume,
+    never a stop, so the figure has to survive the CLEANING edge that follows.
+    """
     from deebot_client.models import State
 
     sensor = _bare_progress_sensor()
