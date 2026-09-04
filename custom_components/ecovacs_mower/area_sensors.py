@@ -83,6 +83,7 @@ def area_sensor_descriptions(
             if area.mow_height_level is not None
             else None,
             native_unit_of_measurement=UnitOfLength.CENTIMETERS,
+            icon="mdi:grass",
         ),
         area_sensor_description(
             area_id,
@@ -92,6 +93,7 @@ def area_sensor_descriptions(
             if area.cut_mode is not None
             else None,
             native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
+            icon="mdi:speedometer",
         ),
         area_sensor_description(
             area_id,
@@ -101,6 +103,7 @@ def area_sensor_descriptions(
             if area.obstacle_height is not None
             else None,
             native_unit_of_measurement=UnitOfLength.CENTIMETERS,
+            icon="mdi:format-vertical-align-top",
         ),
         area_sensor_description(
             area_id,
@@ -110,11 +113,13 @@ def area_sensor_descriptions(
             if area.angle is not None
             else None,
             native_unit_of_measurement=DEGREE,
+            icon="mdi:angle-acute",
         ),
         SensorEntityDescription(
             key=f"area_{area_id}_name",
             translation_key="area_name",
             entity_category=EntityCategory.DIAGNOSTIC,
+            icon="mdi:map-marker",
         ),
     )
 
@@ -175,6 +180,7 @@ class EcovacsAreaNameSensor(EcovacsDescriptionEntity, SensorEntity):
         key="area_name",
         translation_key="area_name",
         entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:map-marker",
     )
 
     def __init__(self, device: Device, area_id: str) -> None:
@@ -266,3 +272,5 @@ def _setup_device_area_sensors(
     config_entry.async_on_unload(
         device.events.subscribe(MowerAreaNameEvent, on_names)
     )
+    device.events.request_refresh(MowerAreaParameterEvent)
+    device.events.request_refresh(MowerAreaNameEvent)
