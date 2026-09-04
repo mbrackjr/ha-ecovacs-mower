@@ -47,11 +47,7 @@
       "stats_time": { "default": "mdi:timer-outline" },
       "total_stats_area": { "default": "mdi:floor-plan" },
       "total_stats_cleanings": { "default": "mdi:counter" },
-      "total_stats_time": { "default": "mdi:timer-outline" },
-      "area_cutting_height": { "default": "mdi:grass" },
-      "area_mowing_speed": { "default": "mdi:speedometer" },
-      "area_obstacle_height": { "default": "mdi:format-vertical-align-top" },
-      "area_cut_direction": { "default": "mdi:angle-acute" }
+      "total_stats_time": { "default": "mdi:timer-outline" }
     },
     "switch": {
       "advanced_mode": { "default": "mdi:tune" },
