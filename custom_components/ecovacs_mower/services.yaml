@@ -1,0 +1,66 @@
+set_area_parameters:
+  name: Set area parameters
+  description: Set mowing parameters for one mower area. Any omitted parameter keeps its current value.
+  target:
+    device:
+      integration: ecovacs_mower
+  fields:
+    area_id:
+      name: Area ID
+      description: Numeric area ID from the mower map.
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 1
+          mode: box
+    mow_height_cm:
+      name: Cutting height
+      description: Desired grass height. Leave empty to keep the current value.
+      required: false
+      selector:
+        select:
+          options:
+            - "3.0"
+            - "4.0"
+            - "5.0"
+            - "6.0"
+            - "7.0"
+            - "8.0"
+            - "9.0"
+    speed_mps:
+      name: Mowing speed
+      description: Desired mowing speed. Leave empty to keep the current value.
+      required: false
+      selector:
+        select:
+          options:
+            - "0.40"
+            - "0.45"
+            - "0.50"
+            - "0.55"
+            - "0.60"
+            - "0.65"
+            - "0.70"
+    obstacle_max_cm:
+      name: Obstacle height
+      description: Maximum obstacle height considered an obstacle. Leave empty to keep the current value.
+      required: false
+      selector:
+        select:
+          options:
+            - "10"
+            - "15"
+            - "20"
+    cutting_angle:
+      name: Cutting angle
+      description: Cutting direction in degrees. Leave empty to keep the current value.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 359
+          step: 1
+          unit_of_measurement: "°"
+          mode: slider
