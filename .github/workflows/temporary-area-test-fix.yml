@@ -1,0 +1,41 @@
+name: temporary-area-test-fix
+on:
+  push:
+    branches: [feat/area-parameter-sensors]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.actor == 'mbrackjr'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/area-parameter-sensors
+      - name: Apply surgical test update
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/test_sensor.py')
+          text = path.read_text()
+          text = text.replace(
+              '        beacon_entity_description,\n    )\n\n    root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"\n',
+              '        beacon_entity_description,\n        area_sensor_descriptions,\n    )\n\n    root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"\n',
+          )
+          text = text.replace(
+              '        beacon_entity_description("EXAMPLE"),\n    )\n    for description in descriptions:',
+              '        beacon_entity_description("EXAMPLE"),\n        *area_sensor_descriptions("EXAMPLE"),\n    )\n    for description in descriptions:',
+          )
+          text = text.replace(
+              '        beacon_entity_description("EXAMPLE"),\n    )\n    keys = {d.translation_key for d in descriptions if d.translation_key}\n',
+              '        beacon_entity_description("EXAMPLE"),\n        *area_sensor_descriptions("EXAMPLE"),\n    )\n    keys = {d.translation_key for d in descriptions if d.translation_key}\n',
+          )
+          path.write_text(text)
+          PY
+      - name: Commit and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/test_sensor.py .github/workflows/temporary-area-test-fix.yml
+          git commit -m 'Fix dynamic area sensor validation'
+          git push
