@@ -54,16 +54,16 @@ def area_sensor_description(
     **kwargs: object,
 ) -> EcovacsAreaSensorEntityDescription:
     """Describe one dynamic sensor for a mower area."""
-    # Keep the area ID in the unique key for stable entity identity, while the
-    # object ID is explicitly kept free of the duplicated ``area_`` prefix that
-    # HA otherwise derives from this dynamic entity description.
     key = f"area_{area_id}_{key_suffix}"
     return EcovacsAreaSensorEntityDescription(
         key=key,
         name=parameter_name,
         value_fn=value_fn,
         parameter_name=parameter_name,
-        suggested_object_id=key.removeprefix("area_"),
+        # Keep the area ID in the suggested object ID so newly created entities
+        # use a stable area-ID-based object ID (for example, area_1_cutting_height)
+        # instead of depending on the mower's user-editable friendly name.
+        suggested_object_id=key,
         entity_category=EntityCategory.DIAGNOSTIC,
         **kwargs,
     )
