@@ -1,0 +1,50 @@
+name: Wire area sensors
+
+on:
+  push:
+    branches:
+      - feat/area-parameter-sensors
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/area-parameter-sensors
+          fetch-depth: 0
+      - name: Add area sensor setup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("custom_components/ecovacs_mower/sensor.py")
+          text = path.read_text()
+
+          old_import = "from .deebot_patch.messages import (\n    MowerBeaconsEvent,\n    MowerJobEdgeEvent,\n    MowerStatsEvent,\n    MowerTriggerEvent,\n)\n"
+          new_import = old_import + "from .area_sensors import async_setup_area_sensors\n"
+          if "from .area_sensors import async_setup_area_sensors" not in text:
+              if old_import not in text:
+                  raise SystemExit("sensor.py import anchor not found")
+              text = text.replace(old_import, new_import, 1)
+
+          old_setup = "    async_add_entities(entities)\n\n\n@callback\ndef _async_setup_beacons("
+          new_setup = "    await async_setup_area_sensors(config_entry, async_add_entities)\n    async_add_entities(entities)\n\n\n@callback\ndef _async_setup_beacons("
+          if "await async_setup_area_sensors(config_entry, async_add_entities)" not in text:
+              if old_setup not in text:
+                  raise SystemExit("sensor.py setup anchor not found")
+              text = text.replace(old_setup, new_setup, 1)
+
+          path.write_text(text)
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/ecovacs_mower/sensor.py
+          git commit -m "Add dynamic mower area sensors"
+          git push
