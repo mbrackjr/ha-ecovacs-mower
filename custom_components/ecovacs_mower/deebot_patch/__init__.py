@@ -31,6 +31,8 @@ from .messages import (
     OnChargeInfo,
     OnChargeState,
     OnCleanInfo,
+    OnMowBorderStart,
+    OnMowBorderStop,
     OnMowScheduleStart,
     OnMowScheduleStop,
     OnMowSpotAreaStart,
@@ -40,6 +42,7 @@ from .messages import (
     OnRainDelay,
     OnScheduleTaskInfo,
     OnStatsMower,
+    OnUwb,
 )
 from .state_precedence import register as register_mower_bus
 from .zonal import MowArea
@@ -89,6 +92,8 @@ def apply() -> None:
         OnChargeInfo,
         OnChargeState,
         OnCleanInfo,
+        OnMowBorderStart,
+        OnMowBorderStop,
         OnMowScheduleStart,
         OnMowScheduleStop,
         OnMowSpotAreaStart,
@@ -98,6 +103,7 @@ def apply() -> None:
         OnRainDelay,
         OnScheduleTaskInfo,
         OnStatsMower,
+        OnUwb,
         OnArI,
         OnMapTrace,
         OnMapTrack,

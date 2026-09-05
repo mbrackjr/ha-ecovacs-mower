@@ -27,13 +27,14 @@ parses the answer to ``getStats``, and ``OnStatsMower`` below parses the
 ``onStats`` push that some classes send and others never do (issue #55).
 
 ``MowerJobEdgeEvent`` republishes the task bury points that mark a job's own
-boundaries — ``onFwBuryPoint-bd_task-mow-{schedule,spotarea}-{start,stop}``,
-four more messages the library has no handler for. They are the only thing on
+boundaries — ``onFwBuryPoint-bd_task-mow-{schedule,spotarea,border}-{start,stop}``,
+six more messages the library has no handler for. They are the only thing on
 the wire that separates a job which has finished from one parked to charge,
 which ``State`` reports identically (issue #73), and a completion carries the
-two areas its final percentage is computed from. Both job types are registered
-because the middle topic segment is the type, not the trigger: a zone job
-started from the app ends on ``mow-spotarea-stop``.
+two areas its final percentage is computed from. All three job types are
+registered because the middle topic segment is the type, not the trigger: a
+zone job started from the app ends on ``mow-spotarea-stop``, an edge cut on
+``mow-border-stop`` (issue #74).
 
 ``OnPos`` is different in kind from the rest of this module: ``onPos`` is not
 unhandled, it is handled wrongly. See the class for what and why.
@@ -56,6 +57,14 @@ last row of the app's Configuration page with no entity behind it (issue #54).
 Its refresh command, ``GetRainDelay``, is in ``commands.py``, and unlike the
 rest of this module it has a write side: ``SetRainDelay`` there sends both
 fields back.
+
+``OnUwb`` is a sixth unhandled message, and the beacons above from a second
+source that disagrees with the first: ``onUWB`` pushes a ``battery`` per beacon
+without being asked. Publishing both into one event would flap the sensor for
+any beacon the two sources number differently, so the polled reading wins and a pushed
+one is only ever a floor under a serial the poll has not delivered — see the
+class for the samples that establish the disagreement, and
+``_LIFE_SPAN_READINGS`` for the record that decides it.
 """
 
 from __future__ import annotations
@@ -65,6 +74,7 @@ import logging
 from abc import ABC
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
+from weakref import WeakKeyDictionary
 
 from deebot_client.commands.json.clean import GetCleanInfo
 from deebot_client.events import Position, PositionsEvent, StateEvent
@@ -109,10 +119,17 @@ class MowerJobEdgeEvent(Event):
 
     The mower publishes four task bury points per job type —
     ``mow-schedule-{start,pause,resume,stop}`` and the same set for
-    ``mow-spotarea`` — and the middle segment is the *job type*, not the
-    trigger: a zone job started from the app ends on ``mow-spotarea-stop``.
-    Only the two edges this integration acts on are registered; adding a
-    ``pause`` or ``resume`` is one subclass each (issue #73).
+    ``mow-spotarea``; ``mow-border`` has been observed with ``start``/``stop``
+    only — and the middle segment is the *job type*, not the trigger: a zone
+    job started from the app ends on ``mow-spotarea-stop``. Only the two
+    edges this integration acts on are registered; adding a ``pause`` or
+    ``resume`` is one subclass each (issue #73).
+
+    The border points speak a different dialect of the same payload:
+    ``triggerType`` where the others say ``trigger``, and ``cuttedArea`` on a
+    stop where the others say ``mowedArea`` (issue #74, captured on a G1-800
+    fw 1.36.208). The handler reads the original spellings first, so the
+    schedule and spot-area paths are untouched by the fallbacks.
 
     ``phase`` is ``"start"`` or ``"stop"``. ``trigger`` is the raw string, and
     what it means is the consumer's business — see ``MowerTriggerEvent`` for
@@ -166,13 +183,17 @@ class _OnMowJobEdge(MessageBody, ABC):
         """Handle message->body."""
         trigger = body.get("trigger")
         if not isinstance(trigger, str) or not trigger:
+            # The border dialect spells it ``triggerType`` (issue #74).
+            trigger = body.get("triggerType")
+        if not isinstance(trigger, str) or not trigger:
             return HandlingResult.analyse()
 
         event_bus.notify(
             MowerJobEdgeEvent(
                 phase=cls.PHASE,
                 trigger=trigger,
-                mowed_area=_as_area(body.get("mowedArea")),
+                # ``cuttedArea`` is the border dialect's ``mowedArea`` (issue #74).
+                mowed_area=_as_area(body.get("mowedArea", body.get("cuttedArea"))),
                 work_area=_as_area(body.get("workArea")),
             )
         )
@@ -204,6 +225,20 @@ class OnMowSpotAreaStop(_OnMowJobEdge):
     """A zone job ends, for whatever reason its trigger names."""
 
     NAME = "onFwBuryPoint-bd_task-mow-spotarea-stop"
+    PHASE = "stop"
+
+
+class OnMowBorderStart(_OnMowJobEdge):
+    """An edge-cut job begins (issue #74)."""
+
+    NAME = "onFwBuryPoint-bd_task-mow-border-start"
+    PHASE = "start"
+
+
+class OnMowBorderStop(_OnMowJobEdge):
+    """An edge-cut job ends, for whatever reason its trigger names."""
+
+    NAME = "onFwBuryPoint-bd_task-mow-border-stop"
     PHASE = "stop"
 
 
@@ -296,6 +331,23 @@ class MowerBeaconsEvent(Event):
 # see test_life_span_enum_has_no_member_for_the_beacon_cells.
 BEACON_COMPONENT = "uwbCell"
 
+# The last life-span reading per beacon serial, per device. ``OnUwb`` reads it
+# to decide which of the two disagreeing sources speaks for a given beacon, and
+# its docstring is where the disagreement itself is written down.
+#
+# Keyed by ``EventBus`` for the reasons ``state_precedence`` documents at
+# length: a message handler is a classmethod that receives nothing else, an
+# ``EventBus`` is per device, and a ``WeakKeyDictionary`` entry dies with its
+# device so nothing has to unregister on unload.
+_LIFE_SPAN_READINGS: WeakKeyDictionary[EventBus, dict[str, float]] = (
+    WeakKeyDictionary()
+)
+
+
+def reset_beacon_readings() -> None:
+    """Forget every recorded life-span reading. Tests only."""
+    _LIFE_SPAN_READINGS.clear()
+
 
 def notify_mower_beacons(event_bus: EventBus, data: list[dict[str, Any]]) -> None:
     """Publish the beacon entries a life-span answer carries, if it has any.
@@ -347,8 +399,143 @@ def notify_mower_beacons(event_bus: EventBus, data: list[dict[str, Any]]) -> Non
         # a blade cannot disagree about what 51.52 means.
         beacons.append(MowerBeacon(sn=sn, percent=round((left / total) * 100, 2)))
 
+    # Recorded here, inside the handler and before notifying, because a
+    # subscription cannot do this job: EventBus.notify drops an event equal
+    # to the previous one of the same type before any subscriber runs, and
+    # dispatches the rest through create_task — so a subscriber would miss
+    # every repeat and see the rest out of order with respect to a push
+    # arriving in between.
+    #
+    # Replaced rather than updated, and unconditionally so: an answer that no
+    # longer lists any beacon at all is still this source withdrawing every
+    # claim it previously made, and OnUwb is then the only thing that knows
+    # anything about them. Gating this on ``beacons`` being non-empty would
+    # leave a stale reading in place exactly when the poll has the least to
+    # say — a mower that stops reporting beacons entirely.
+    _LIFE_SPAN_READINGS[event_bus] = {
+        beacon.sn: beacon.percent for beacon in beacons
+    }
+
     if beacons:
         event_bus.notify(MowerBeaconsEvent(beacons=tuple(beacons)))
+
+
+class OnUwb(MessageBodyDataDict):
+    """The beacon batteries as the mower pushes them, where the poll has none.
+
+    ``onUWB`` has no handler in the library at all, so today it is logged as
+    ``Unknown message "onUWB"`` and thrown away. It carries one entry per UWB
+    beacon keyed by the same serial ``getLifeSpan`` uses, with the level in a
+    field called ``battery`` (issue #40, captured on a G1-800 fw 1.36.208
+    during a border job).
+
+    **The two sources do not agree, and this handler is shaped entirely by
+    that.** On the reporter's four beacons, three matched exactly and one read
+    a round 100 here against 83 in ``getLifeSpan`` — in all seven samples
+    across two days, before and after another beacon's cells were replaced. So
+    they are not interchangeable, and simply republishing what arrives would
+    make that beacon's sensor flap between 83 and 100 depending on which source
+    spoke last. Which number is *correct* cannot be settled from here; the one
+    hint is that the disagreement is this source reporting a round 100 where
+    the other reports less, which is consistent with it saturating at the top
+    of its range.
+
+    The rule is therefore: a life-span reading always wins, and a pushed one is
+    only ever a floor under a serial the poll has not delivered. That floor is
+    not hypothetical — ``getLifeSpan`` is a poll, and polls on this firmware
+    answer ``{'ret': 'fail', 'errno': 500}`` intermittently or constantly
+    (issue #42), which would otherwise leave the sensors unknown for as long as
+    it lasts. It also fills them in faster after a restart, since the push does
+    not wait for a round trip.
+
+    Once every serial has been polled the push contributes nothing and this
+    publishes nothing, rather than an event the bus would only have to dedupe.
+
+    The set is always published **whole**, with the polled values substituted
+    in, never as just the serials this source contributes:
+    ``EcovacsBeaconSensor`` reads a beacon missing from an event as unknown on
+    purpose, so a partial set would blank every sensor the poll does know.
+
+    ``x``/``y`` are ignored: they are 0 on every sample of this push, unlike the
+    ``getPos`` reply where ``uwbPos`` carries real map-frame coordinates.
+    ``state`` and ``otaResult`` are ignored too — both read 0 on all four
+    beacons including the flat one, so neither is a health flag, and guessing
+    at what their non-zero values mean is not this layer's business.
+    """
+
+    NAME = "onUWB"
+
+    @classmethod
+    def _handle_body_data_dict(
+        cls, event_bus: EventBus, data: dict[str, Any]
+    ) -> HandlingResult:
+        """Handle message->body->data.
+
+        An empty list is handled rather than analysed, the distinction ``OnMI``
+        and ``OnPos`` make: a mower that navigates without beacons has nothing
+        to report, which is not a payload this handler failed to understand.
+        """
+        entries = data.get("uwbPos")
+        if not isinstance(entries, list):
+            return HandlingResult.analyse()
+
+        polled = _LIFE_SPAN_READINGS.get(event_bus, {})
+        beacons: list[MowerBeacon] = []
+        seen: set[str] = set()
+        contributed = False
+
+        for entry in entries:
+            sn = entry.get("sn") if isinstance(entry, dict) else None
+            if not isinstance(sn, str) or not sn:
+                # Same rule as the life-span parser one function up: without a
+                # serial the reading cannot be attributed to a beacon, and the
+                # wrong beacon is worse than no beacon.
+                _LOGGER.warning("Beacon push without a serial, dropped: %s", entry)
+                continue
+
+            if sn in seen:
+                _LOGGER.warning("Beacon push %s reported more than once, dropped", sn)
+                continue
+            seen.add(sn)
+
+            if (percent := polled.get(sn)) is None:
+                battery = entry.get("battery")
+                # bool is an int subclass in Python, and a True arriving here is
+                # a firmware quirk to drop, not one percent. The range is
+                # checked because this field feeds a battery device class, and
+                # HA's own low-battery handling is built on it meaning what it
+                # says.
+                if isinstance(battery, bool) or not isinstance(battery, (int, float)):
+                    _LOGGER.warning(
+                        "Beacon push %s carries no usable battery: %s", sn, entry
+                    )
+                    continue
+                if not 0 <= battery <= 100:
+                    _LOGGER.warning(
+                        "Beacon push %s reports %s %%, dropped", sn, battery
+                    )
+                    continue
+                # float, matching what the life-span parser produces, so the two
+                # sources cannot disagree about what 83 means on the way to the
+                # same event.
+                percent = float(battery)
+                contributed = True
+
+            beacons.append(MowerBeacon(sn=sn, percent=percent))
+
+        if contributed:
+            # Whole relative to the poll too, not just to this push: a serial
+            # the poll has delivered but this push omits is not the poll's
+            # claim being withdrawn — only ``notify_mower_beacons`` gets to do
+            # that — so it is unioned in here rather than left to fall out of
+            # the event and read as unknown.
+            beacons.extend(
+                MowerBeacon(sn=sn, percent=percent)
+                for sn, percent in polled.items()
+                if sn not in seen
+            )
+            event_bus.notify(MowerBeaconsEvent(beacons=tuple(beacons)))
+        return HandlingResult.success()
 
 
 class OnStatsMower(OnStats):
