@@ -50,11 +50,13 @@ Releases are cut by `.github/workflows/release.yml`, which runs after the test s
 
 Device identity is established by `deebot-client` on `Device` creation. The patch layer must treat the device class/model as the primary capability discriminator and retain firmware as first-class identity metadata. Do not duplicate that identity as a second authoritative state store when the `Device` already owns it.
 
-`deebot_patch/device.py` is the single profile registry for patch-side model capabilities and model-specific semantics. Firmware-specific behavior must only be added when a real firmware-dependent difference has been established. Do not scatter class/model/firmware conditionals through HA platforms.
+`deebot_patch/device.py` is the single profile registry for patch-side capability decisions. It may decide whether a protocol capability exists for a verified device class, but it must not contain model- or firmware-specific conversion from raw device values to human-sensible Home Assistant values.
+
+**Raw-value representation boundary:** `deebot_patch` owns the Ecovacs wire format and raw protocol values only. Any model- or firmware-specific interpretation of those raw values — for example, mapping a numeric mow-height level to centimetres, a cut-mode level to metres per second, an obstacle-height code to centimetres, or a wire-space angle to an HA/app-space angle — lives exclusively in the HA layer. Such mappings must be selected there from the actual device identity and must never be generalized from one mower to another without independent validation. Firmware-specific representation is subject to the same rule even when the protocol field names are identical.
+
+Do not scatter model/class/firmware capability conditionals through HA platforms. The HA layer may select its representation mapping from the patch/device identity, but the mapping itself belongs only to HA. The patch must not import HA modules or depend on HA units, entity semantics, or presentation values.
 
 Feature state belongs below HA. For dynamic mower areas, `deebot_patch` owns one authoritative `area_id -> MowerArea` snapshot containing the stable numeric area ID, optional friendly name, and raw protocol parameter values. HA must consume that snapshot and must not maintain a second authoritative copy of area state.
-
-Model-specific raw-to-HA conversions belong in the model profile. The A1600 LiDAR Pro mappings are not generic GOAT mappings and must not be generalized to another mower class without validation.
 
 ### Mower area capability
 
@@ -95,6 +97,7 @@ Dynamic entities are the explicit exception when entity identity/count cannot be
 ## Conventions
 
 - **This is a public repo — all outward-facing text is English**: docstrings, comments, commit messages, PR descriptions, issue/discussion replies. Code identifiers are English too. Forked modules open their docstring with what was removed compared to core.
+- **Preserve existing remarks:** do not delete, rewrite, condense, or move existing comments/docstrings/remarks when changing code. Existing remarks carry architectural rationale, hardware evidence, issue references, and operational constraints. The only allowed changes are (a) comments/docstrings we add ourselves, (b) small corrections to an existing remark when the underlying fact is actually corrected, or (c) a narrowly scoped clarification required by a functionality change. Do not treat comment cleanup as part of refactoring.
 - Comments explain *why*, especially where the code looks needlessly convoluted (exact type comparison instead of `isinstance`, in-place mutation instead of rebinding). Don't remove them to "clean up".
 - `strings.json` and `translations/en.json` must be **identical** — `test_translations.py` guards this, nothing syncs them automatically. Never create an `sv.json`; the HA frontend's language here is English.
 - Every translation key and `icons.json` key must belong to a real entity — the platform tests check both directions.
