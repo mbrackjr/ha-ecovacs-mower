@@ -31,7 +31,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
 from .deebot_patch.areas import MowerArea, MowerAreaEvent
-from .deebot_patch.device import MowerProfile, profile_for
+from .deebot_patch.device import profile_for
 from .entity import EcovacsDescriptionEntity
 
 
@@ -260,7 +260,7 @@ async def async_setup_area_sensors(
         if area_mapping is None:
             continue
         _setup_device_area_sensors(
-            device, config_entry, async_add_entities, profile, area_mapping
+            device, config_entry, async_add_entities, area_mapping
         )
 
 
@@ -268,11 +268,9 @@ def _setup_device_area_sensors(
     device: Device,
     config_entry: EcovacsMowerConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
-    profile: MowerProfile,
     area_mapping: AreaParameterMapping,
 ) -> None:
     """Project the patch-owned area state into dynamic HA entities."""
-    del profile
     entities: dict[str, list[EcovacsAreaSensor]] = {}
 
     def add_area(area: MowerArea) -> None:
