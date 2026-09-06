@@ -150,6 +150,7 @@ class EcovacsAreaNumberEntityDescription(NumberEntityDescription):
 
     value_fn: Callable[[MowerArea], float | int | None]
     to_raw_fn: Callable[[float], int | None]
+    raw_field: str
     parameter_name: str
     suggested_object_id: str | None = None
 
@@ -158,6 +159,7 @@ def area_number_description(
     area_id: str,
     key_suffix: str,
     parameter_name: str,
+    raw_field: str,
     value_fn: Callable[[MowerArea], float | int | None],
     to_raw_fn: Callable[[float], int | None],
     **kwargs: object,
@@ -168,6 +170,7 @@ def area_number_description(
         name=parameter_name,
         value_fn=value_fn,
         to_raw_fn=to_raw_fn,
+        raw_field=raw_field,
         parameter_name=parameter_name,
         # Keep the numeric area ID in the suggested object ID so newly created
         # entities use a stable area-ID-based object ID instead of depending on
@@ -189,6 +192,7 @@ def area_sensor_descriptions(
             area_id,
             "cutting_height",
             "Cutting height",
+            "mow_height_level",
             lambda area: area_mapping.mow_height(area.mow_height_level)
             if area.mow_height_level is not None
             else None,
@@ -203,6 +207,7 @@ def area_sensor_descriptions(
             area_id,
             "mowing_speed",
             "Mowing speed",
+            "cut_mode",
             lambda area: area_mapping.cut_speed(area.cut_mode)
             if area.cut_mode is not None
             else None,
@@ -217,6 +222,7 @@ def area_sensor_descriptions(
             area_id,
             "obstacle_height",
             "Obstacle height",
+            "obstacle_height",
             lambda area: area_mapping.obstacle_height(area.obstacle_height)
             if area.obstacle_height is not None
             else None,
@@ -231,6 +237,7 @@ def area_sensor_descriptions(
             area_id,
             "cut_direction",
             "Cutting direction",
+            "angle",
             lambda area: area_mapping.cut_angle(area.angle)
             if area.angle is not None
             else None,
@@ -342,14 +349,7 @@ class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
             "obstacle_height": area.obstacle_height,
             "angle": area.angle,
         }
-        field_by_key = {
-            "cutting_height": "mow_height_level",
-            "mowing_speed": "cut_mode",
-            "obstacle_height": "obstacle_height",
-            "cut_direction": "angle",
-        }
-        raw_field = field_by_key[self.entity_description.key.rsplit("_", 1)[-1]]
-        raw_values[raw_field] = raw_value
+        raw_values[self.entity_description.raw_field] = raw_value
 
         await self._execute_command(
             SetAreaParameter(
