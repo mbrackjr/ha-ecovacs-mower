@@ -407,8 +407,8 @@ Two things worth knowing:
   minutes while a run is in progress, stopping when the mower parks. A run
   interrupted by charging needs no special case — the mower docks, the poll
   stops, and it starts again when the job resumes. The poll is also why the
-  final figure comes from elsewhere: its five-minute cadence rarely lands on
-  the last percent of a run, so the reading is completed from the job-finished
+  final figure comes from elsewhere: its five-minute cadence rarely lands on the
+  last percent of a run, so the reading is completed from the job-finished
   message the mower pushes at the same moment.
 
 `paused` is deliberately not a reason to stop asking: it is a normal mid-run
@@ -449,9 +449,6 @@ poll that failed is not proof that a beacon is gone.
 `uwbCell` component, and it raises on one rather than skipping it — which took
 the rest of the answer with it, since the parser publishes as it goes. On a
 G1-800 the components arrive in the order blade, beacons, lens brush, so the
-blade percentage worked, the beacons were invisible, **and the lens brush
-reported a value from before the beacons were paired that could never change.**
-On a G1-800 the components arrive in the order blade, beacons, lens brush, so the
 blade percentage worked, the beacons were invisible, **and the lens brush
 reported a value from before the beacons were paired that could never change.**
 That last one is fixed here too, as a side effect of not giving up on the
