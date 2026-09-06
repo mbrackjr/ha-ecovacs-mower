@@ -194,6 +194,10 @@ class GetAreaSet(CustomCommand):
     def _handle_response(
         self, event_bus: EventBus, response: dict[str, Any]
     ) -> HandlingResult:
+        # The Ecovacs app can issue getAreaSet independently. deebot-client only
+        # dispatches P2P responses associated with commands issued by this
+        # client, so app-originated responses are not visible here. Reloading
+        # the integration or restarting Home Assistant triggers a normal refresh.
         """Merge decoded area inventory and names into the snapshot."""
         if response.get("ret") != "ok":
             return super()._handle_response(event_bus, response)
