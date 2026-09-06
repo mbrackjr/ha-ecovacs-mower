@@ -164,13 +164,14 @@ stored, and the entry stops asking. There is no need to delete and re-add it.
 
 ## What you get
 
-Forty-two entities on the mower's device page, across eight platforms —
-plus one per UWB beacon on the models that use them:
+Forty-two fixed entities on the mower's device page, across eight platforms —
+plus one per UWB beacon on the models that use them and four per configured
+area on the A1600 LiDAR Pro:
 
 | Platform | Count | What |
 |---|---|---|
 | `lawn_mower` | 1 | Real state (`mowing`, `paused`, `returning`, `docked`, `error`) that updates within seconds, plus working `start_mowing`, `pause`, and `dock` |
-| `sensor` | 16 + one per beacon | Activity (the mower's state with the reason folded in — `returning_rain`, `docked_rain_delay`; see below), battery, error code (disabled by default — see below), mowing progress (see below), job target area, job target duration, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name, and on a beacon-guided mower one battery percentage per UWB beacon (see below) |
+| `sensor` | 16 + one per beacon + four per A1600 LiDAR Pro area | Activity (the mower's state with the reason folded in — `returning_rain`, `docked_rain_delay`; see below), battery, error code (disabled by default — see below), mowing progress (see below), job target area, job target duration, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name, and on a beacon-guided mower one battery percentage per UWB beacon (see below). On an A1600 LiDAR Pro, four additional sensors per configured area report mowing height, cutting speed, obstacle height and cutting direction (see below) |
 | `binary_sensor` | 6 | Fault — a latched problem that stays on until the mower recovers or you clear it (see below) — plus rain sensor, rain delay, emergency stop, locked, animal protection: the mower's raw protection flags, from the `onProtectState` message the library drops (see below) |
 | `switch` | 8 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection, rain detection (see below) |
 | `number` | 3 | Notification volume, cutting direction, rain delay duration (see below) |
@@ -181,6 +182,20 @@ plus one per UWB beacon on the models that use them:
 Not included yet: **RTK diagnostics** (position and satellite data) and
 zone control. RTK is planned for the next release; the other has no
 committed date.
+
+### Area parameters
+
+On the **Ecovacs GOAT A1600 LiDAR Pro** (`e4gqia`), each configured mower
+area exposes four read-only sensors: mowing height, cutting speed, obstacle
+height and cutting direction. The sensors use the mower's numeric `areaID`
+for their identity and convert the mower's raw parameter levels to
+Home Assistant values.
+
+This capability is intentionally restricted to `e4gqia`. The raw values and
+their meanings have been validated on that model only; matching field names
+on another GOAT model are not evidence that the semantics are the same.
+Other device classes will be enabled only after independent validation.
+Per-area write support is not included yet.
 
 ### Area names
 
@@ -392,8 +407,8 @@ Two things worth knowing:
   minutes while a run is in progress, stopping when the mower parks. A run
   interrupted by charging needs no special case — the mower docks, the poll
   stops, and it starts again when the job resumes. The poll is also why the
-  final figure comes from elsewhere: its five-minute cadence rarely lands on the
-  last percent of a run, so the reading is completed from the job-finished
+  final figure comes from elsewhere: its five-minute cadence rarely lands on
+  the last percent of a run, so the reading is completed from the job-finished
   message the mower pushes at the same moment.
 
 `paused` is deliberately not a reason to stop asking: it is a normal mid-run
@@ -434,6 +449,9 @@ poll that failed is not proof that a beacon is gone.
 `uwbCell` component, and it raises on one rather than skipping it — which took
 the rest of the answer with it, since the parser publishes as it goes. On a
 G1-800 the components arrive in the order blade, beacons, lens brush, so the
+blade percentage worked, the beacons were invisible, **and the lens brush
+reported a value from before the beacons were paired that could never change.**
+On a G1-800 the components arrive in the order blade, beacons, lens brush, so the
 blade percentage worked, the beacons were invisible, **and the lens brush
 reported a value from before the beacons were paired that could never change.**
 That last one is fixed here too, as a side effect of not giving up on the
