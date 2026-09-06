@@ -20,7 +20,7 @@ from deebot_client.capabilities import CapabilityEvent
 from deebot_client.events import StateEvent, StatsEvent
 from deebot_client.hardware import _DEVICES, get_static_device_info
 
-from .areas import GetAreaParameter, GetAreaSet, MowerAreaEvent, SetAreaParameter
+from .areas import GetAreaParameter, GetAreaSet, MowerAreaEvent
 from .commands import (
     CleanMower,
     GetLifeSpanMower,
@@ -184,13 +184,9 @@ async def patch_device_info(class_: str) -> None:
     }
     profile = profile_for_class(class_)
     if profile is not None and profile.area_parameters:
-        # One area event represents the whole area capability. The reads and
-        # writes all operate on the same authoritative raw area snapshot.
-        events[MowerAreaEvent] = [
-            GetAreaParameter(),
-            GetAreaSet(),
-            SetAreaParameter,
-        ]
+        # One area event represents the whole area capability. The two protocol
+        # reads populate one authoritative raw snapshot before notifying it.
+        events[MowerAreaEvent] = [GetAreaParameter(), GetAreaSet()]
 
     object.__setattr__(patched, "_events", MappingProxyType(events))
 
