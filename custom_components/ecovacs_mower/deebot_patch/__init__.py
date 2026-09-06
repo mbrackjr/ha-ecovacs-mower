@@ -16,24 +16,13 @@ from deebot_client.events import StateEvent
 from deebot_client.hardware import _DEVICES
 from deebot_client.messages.json import MESSAGES
 
-from .areas import (
-    AREA_PARAMETER_CLASSES,
-    GetAreaParameter,
-    GetAreaSet,
-    MowerAreaNameEvent,
-    MowerAreaParameterEvent,
-)
+from .areas import GetAreaParameter, GetAreaSet, MowerAreaEvent
 from .authentication import AccountAuthenticator
 from .commands import CleanMower, GetCleanInfoMower, MowerStateRefresh, has_family
+from .device import DeviceIdentity, MowerProfile, identity_for, profile_for
 from .families import attempted_family_name
 from .hardware import SUPPORTED_CLASSES, patch_device_info
-from .map_messages import (
-    OnArI,
-    OnMapTrace,
-    OnMapTrack,
-    OnMI,
-    OnSpecialContour,
-)
+from .map_messages import OnArI, OnMapTrace, OnMapTrack, OnMI, OnSpecialContour
 from .messages import (
     OnChargeInfo,
     OnChargeState,
@@ -54,13 +43,20 @@ __all__ = [
     "SUPPORTED_CLASSES",
     "AccountAuthenticator",
     "CleanMower",
+    "DeviceIdentity",
+    "GetAreaParameter",
+    "GetAreaSet",
     "GetCleanInfoMower",
+    "MowerAreaEvent",
+    "MowerProfile",
     "MowerStateRefresh",
     "PatchContractError",
     "apply",
     "attempted_family_name",
     "has_family",
+    "identity_for",
     "patch_device_info",
+    "profile_for",
     "register_mower_bus",
     "verify_capabilities",
 ]
@@ -89,8 +85,6 @@ def apply() -> None:
     if not isinstance(MESSAGES, dict):
         _fail("deebot_client.messages.json.MESSAGES is not a dict")
 
-    # Mutated in place: messages/__init__.py holds a reference to the same
-    # object, so a rebinding would not be visible in get_message().
     for message in (
         OnChargeInfo,
         OnChargeState,
@@ -118,48 +112,29 @@ def apply() -> None:
 
 
 def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
-    """Confirm that the capabilities a device actually got are the patched ones.
-
-    The check runs against the object in ``DeviceInfo.static``, not against the
-    cache. That is the only check that proves the patch got in before
-    ``get_devices()`` — a cache lookup would look correct even if the device was
-    built from an unpatched definition.
-    """
+    """Confirm that the capabilities a device actually received are patched."""
     if capabilities.clean.action.command is not CleanMower:
         _fail(
             f"device {class_} was built with {capabilities.clean.action.command.__name__} "
             f"instead of CleanMower — the patch ran too late"
         )
 
-    # Exact type comparison, not isinstance: both GetCleanInfoV2 and our own
-    # classes inherit from GetCleanInfo, so isinstance() would accept exactly
-    # the unpatched set we want to catch. The check would be toothless.
-    #
-    # The length is pinned as well. A second command here is the race in issue
-    # #67 — the two answers land in one TaskGroup and the last one wins — so a
-    # GetChargeState() finding its way back into the list must fail loudly
-    # rather than quietly reintroduce the flapping.
     commands = capabilities.get_refresh_commands(StateEvent)
     if [type(command) for command in commands] != [MowerStateRefresh]:
         _fail(
             f"the state commands for {class_} are "
-            f"{[type(c).__name__ for c in commands]} instead of "
-            f"[MowerStateRefresh]"
+            f"{[type(c).__name__ for c in commands]} instead of [MowerStateRefresh]"
         )
 
-    if class_ in AREA_PARAMETER_CLASSES:
-        parameter_commands = capabilities.get_refresh_commands(MowerAreaParameterEvent)
-        if [type(command) for command in parameter_commands] != [GetAreaParameter]:
+    profile = profile_for(class_)
+    if profile is not None and profile.area_parameters:
+        area_commands = capabilities.get_refresh_commands(MowerAreaEvent)
+        if [type(command) for command in area_commands] != [
+            GetAreaParameter,
+            GetAreaSet,
+        ]:
             _fail(
-                f"the area parameter commands for {class_} are "
-                f"{[type(c).__name__ for c in parameter_commands]} instead of "
-                f"[GetAreaParameter]"
-            )
-
-        name_commands = capabilities.get_refresh_commands(MowerAreaNameEvent)
-        if [type(command) for command in name_commands] != [GetAreaSet]:
-            _fail(
-                f"the area name commands for {class_} are "
-                f"{[type(c).__name__ for c in name_commands]} instead of "
-                f"[GetAreaSet]"
+                f"the area commands for {class_} are "
+                f"{[type(c).__name__ for c in area_commands]} instead of "
+                f"[GetAreaParameter, GetAreaSet]"
             )
