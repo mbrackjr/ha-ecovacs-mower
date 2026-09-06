@@ -1,4 +1,4 @@
-"""Dynamic Home Assistant entities for mower areas.
+"""Dynamic Home Assistant entities for mower area parameters.
 
 Area identity and state are owned by ``deebot_patch``. This module only turns
 that state into the four model-specific area parameter views. The entities are
@@ -11,9 +11,11 @@ A1600 LiDAR Pro findings that established these mappings are deliberately scoped
 to that model: the values have not been verified on the other mower classes
 supported by this integration.
 
-The parameter values are read-only in this change. The device requires all five
-``setAreaParameter`` fields on every write, so adding a write path before the
-read/merge state is deliberately left for a separate change.
+The four parameter views are writable on the validated A1600 model. Each write
+is converted back to raw protocol values and merged with the other three values
+from the authoritative area snapshot before one complete ``setAreaParameter``
+command is sent. The entity state is not updated optimistically; the mower must
+report the resulting raw values through the normal area refresh.
 """
 
 from __future__ import annotations
@@ -24,13 +26,19 @@ from typing import Callable, override
 from deebot_client.capabilities import DeviceType
 from deebot_client.device import Device
 
-from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
+from homeassistant.components.number import NumberEntity, NumberEntityDescription
 from homeassistant.const import DEGREE, EntityCategory, UnitOfLength, UnitOfSpeed
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
-from .deebot_patch.areas import MowerArea, MowerAreaEvent
+from .deebot_patch.areas import (
+    MowerArea,
+    MowerAreaEvent,
+    SetAreaParameter,
+    area_for,
+)
 from .deebot_patch.device import profile_for
 from .entity import EcovacsDescriptionEntity
 
@@ -40,9 +48,13 @@ class AreaParameterMapping:
     """HA representation mapping for one verified mower model."""
 
     mow_height: Callable[[int], float | None]
+    mow_height_to_raw: Callable[[float], int | None]
     cut_speed: Callable[[int], float | None]
+    cut_speed_to_raw: Callable[[float], int | None]
     obstacle_height: Callable[[int], int | None]
+    obstacle_height_to_raw: Callable[[float], int | None]
     cut_angle: Callable[[int], int | None]
+    cut_angle_to_raw: Callable[[float], int | None]
 
 
 def _a1600_mow_height(level: int) -> float | None:
@@ -54,6 +66,13 @@ def _a1600_mow_height(level: int) -> float | None:
     if level not in range(1, 8):
         return None
     return float(10 - level)
+
+
+def _a1600_mow_height_to_raw(value: float) -> int | None:
+    """Convert an A1600 cutting height in cm to its raw level."""
+    if value not in range(3, 10):
+        return None
+    return int(10 - value)
 
 
 def _a1600_cut_speed(level: int) -> float | None:
@@ -68,9 +87,24 @@ def _a1600_cut_speed(level: int) -> float | None:
     return round(0.40 + 0.05 * (7 - level), 2)
 
 
+def _a1600_cut_speed_to_raw(value: float) -> int | None:
+    """Convert an A1600 mowing speed in m/s to its raw level."""
+    if value < 0.40 or value > 0.70:
+        return None
+    level = round(7 - ((value - 0.40) / 0.05))
+    if level not in range(1, 8) or _a1600_cut_speed(level) != round(value, 2):
+        return None
+    return level
+
+
 def _a1600_obstacle_height(level: int) -> int | None:
     """Convert A1600 ``obstacleHeight`` to the obstacle threshold in cm."""
     return {1: 10, 2: 15, 3: 20}.get(level)
+
+
+def _a1600_obstacle_height_to_raw(value: float) -> int | None:
+    """Convert an A1600 obstacle threshold in cm to its raw level."""
+    return {10: 1, 15: 2, 20: 3}.get(value)
 
 
 def _a1600_cut_angle(wire_angle: int) -> int | None:
@@ -85,6 +119,13 @@ def _a1600_cut_angle(wire_angle: int) -> int | None:
     return (270 - wire_angle) % 360
 
 
+def _a1600_cut_angle_to_raw(value: float) -> int | None:
+    """Convert an A1600 app-space cutting direction to wire-space angle."""
+    if value not in range(360):
+        return None
+    return int((270 - value) % 360)
+
+
 # These mappings are presentation semantics, not protocol semantics. Keep them
 # in the HA layer and add a class only after its raw-value representation has
 # been verified independently. Do not infer that another GOAT class shares the
@@ -92,40 +133,47 @@ def _a1600_cut_angle(wire_angle: int) -> int | None:
 AREA_PARAMETER_MAPPINGS: dict[str, AreaParameterMapping] = {
     "e4gqia": AreaParameterMapping(
         mow_height=_a1600_mow_height,
+        mow_height_to_raw=_a1600_mow_height_to_raw,
         cut_speed=_a1600_cut_speed,
+        cut_speed_to_raw=_a1600_cut_speed_to_raw,
         obstacle_height=_a1600_obstacle_height,
+        obstacle_height_to_raw=_a1600_obstacle_height_to_raw,
         cut_angle=_a1600_cut_angle,
+        cut_angle_to_raw=_a1600_cut_angle_to_raw,
     ),
 }
 
 
 @dataclass(kw_only=True, frozen=True)
-class EcovacsAreaSensorEntityDescription(SensorEntityDescription):
-    """Describe one dynamic view of one mower area."""
+class EcovacsAreaNumberEntityDescription(NumberEntityDescription):
+    """Describe one dynamic writable view of one mower area."""
 
     value_fn: Callable[[MowerArea], float | int | None]
+    to_raw_fn: Callable[[float], int | None]
     parameter_name: str
     suggested_object_id: str | None = None
 
 
-def area_sensor_description(
+def area_number_description(
     area_id: str,
     key_suffix: str,
     parameter_name: str,
     value_fn: Callable[[MowerArea], float | int | None],
+    to_raw_fn: Callable[[float], int | None],
     **kwargs: object,
-) -> EcovacsAreaSensorEntityDescription:
-    """Describe one dynamic sensor for a mower area."""
-    return EcovacsAreaSensorEntityDescription(
+) -> EcovacsAreaNumberEntityDescription:
+    """Describe one dynamic number entity for a mower area."""
+    return EcovacsAreaNumberEntityDescription(
         key=f"area_{area_id}_{key_suffix}",
         name=parameter_name,
         value_fn=value_fn,
+        to_raw_fn=to_raw_fn,
         parameter_name=parameter_name,
         # Keep the numeric area ID in the suggested object ID so newly created
         # entities use a stable area-ID-based object ID instead of depending on
         # the mower's user-editable friendly name.
         suggested_object_id=f"{area_id}_{key_suffix}",
-        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_category=EntityCategory.CONFIG,
         **kwargs,
     )
 
@@ -134,62 +182,78 @@ def area_sensor_descriptions(
     area_id: str,
     *,
     area_mapping: AreaParameterMapping,
-) -> tuple[EcovacsAreaSensorEntityDescription, ...]:
-    """Return the four model-specific area parameter views."""
+) -> tuple[EcovacsAreaNumberEntityDescription, ...]:
+    """Return the four model-specific writable area parameter views."""
     return (
-        area_sensor_description(
+        area_number_description(
             area_id,
             "cutting_height",
             "Cutting height",
             lambda area: area_mapping.mow_height(area.mow_height_level)
             if area.mow_height_level is not None
             else None,
+            area_mapping.mow_height_to_raw,
+            native_min_value=3,
+            native_max_value=9,
+            native_step=1,
             native_unit_of_measurement=UnitOfLength.CENTIMETERS,
             icon="mdi:grass",
         ),
-        area_sensor_description(
+        area_number_description(
             area_id,
             "mowing_speed",
             "Mowing speed",
             lambda area: area_mapping.cut_speed(area.cut_mode)
             if area.cut_mode is not None
             else None,
+            area_mapping.cut_speed_to_raw,
+            native_min_value=0.40,
+            native_max_value=0.70,
+            native_step=0.05,
             native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
             icon="mdi:speedometer",
         ),
-        area_sensor_description(
+        area_number_description(
             area_id,
             "obstacle_height",
             "Obstacle height",
             lambda area: area_mapping.obstacle_height(area.obstacle_height)
             if area.obstacle_height is not None
             else None,
+            area_mapping.obstacle_height_to_raw,
+            native_min_value=10,
+            native_max_value=20,
+            native_step=5,
             native_unit_of_measurement=UnitOfLength.CENTIMETERS,
             icon="mdi:format-vertical-align-top",
         ),
-        area_sensor_description(
+        area_number_description(
             area_id,
             "cut_direction",
             "Cutting direction",
             lambda area: area_mapping.cut_angle(area.angle)
             if area.angle is not None
             else None,
+            area_mapping.cut_angle_to_raw,
+            native_min_value=0,
+            native_max_value=359,
+            native_step=1,
             native_unit_of_measurement=DEGREE,
             icon="mdi:angle-acute",
         ),
     )
 
 
-class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
-    """Expose one read-only parameter from one mower area."""
+class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
+    """Expose one writable parameter from one mower area."""
 
-    entity_description: EcovacsAreaSensorEntityDescription
+    entity_description: EcovacsAreaNumberEntityDescription
 
     def __init__(
         self,
         device: Device,
         area_id: str,
-        description: EcovacsAreaSensorEntityDescription,
+        description: EcovacsAreaNumberEntityDescription,
         area_name: str,
     ) -> None:
         """Initialize the dynamic area entity."""
@@ -231,7 +295,7 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
         self._subscribe(MowerAreaEvent, self._on_area_state)
 
     async def _on_area_state(self, event: MowerAreaEvent) -> None:
-        """Project this area's parameter into the sensor state."""
+        """Project this area's parameter into the number state."""
         area = next(
             (area for area in event.areas if area.area_id == self._area_id), None
         )
@@ -243,12 +307,67 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
                 self.set_area_name(area.name)
         self.async_write_ha_state()
 
+    @override
+    async def async_set_native_value(self, value: float) -> None:
+        """Set one area parameter using the mower's complete raw state."""
+        raw_value = self.entity_description.to_raw_fn(value)
+        if raw_value is None:
+            raise HomeAssistantError(
+                f"{self.entity_description.parameter_name} value {value} "
+                "cannot be represented by this mower"
+            )
+
+        area = area_for(self._device.events, self._area_id)
+        if area is None:
+            raise HomeAssistantError(
+                f"Area {self._area_id} has not reported its parameters yet"
+            )
+        if any(
+            parameter is None
+            for parameter in (
+                area.mow_height_level,
+                area.cut_mode,
+                area.obstacle_height,
+                area.angle,
+            )
+        ):
+            raise HomeAssistantError(
+                f"Area {self._area_id} has incomplete parameters; wait for "
+                "the mower to report all area settings"
+            )
+
+        raw_values = {
+            "mow_height_level": area.mow_height_level,
+            "cut_mode": area.cut_mode,
+            "obstacle_height": area.obstacle_height,
+            "angle": area.angle,
+        }
+        field_by_key = {
+            "cutting_height": "mow_height_level",
+            "mowing_speed": "cut_mode",
+            "obstacle_height": "obstacle_height",
+            "cut_direction": "angle",
+        }
+        raw_field = field_by_key[self.entity_description.key.rsplit("_", 1)[-1]]
+        raw_values[raw_field] = raw_value
+
+        await self._execute_command(
+            SetAreaParameter(
+                area_id=area.area_id,
+                mow_height_level=raw_values["mow_height_level"],
+                cut_mode=raw_values["cut_mode"],
+                obstacle_height=raw_values["obstacle_height"],
+                angle=raw_values["angle"],
+            )
+        )
+        self._device.events.request_refresh(MowerAreaEvent)
+
 
 async def async_setup_area_sensors(
     config_entry: EcovacsMowerConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Add dynamic area sensors for model profiles that support them."""
+    """Add dynamic area parameter entities for model profiles that support them."""
     controller = config_entry.runtime_data
     for device in controller.devices:
         if device.capabilities.device_type is not DeviceType.MOWER:
@@ -271,7 +390,7 @@ def _setup_device_area_sensors(
     area_mapping: AreaParameterMapping,
 ) -> None:
     """Project the patch-owned area state into dynamic HA entities."""
-    entities: dict[str, list[EcovacsAreaSensor]] = {}
+    entities: dict[str, list[EcovacsAreaNumber]] = {}
 
     def add_area(area: MowerArea) -> None:
         """Create the four entities for a newly discovered area."""
@@ -279,7 +398,7 @@ def _setup_device_area_sensors(
             return
         name = area.name or f"Area {area.area_id}"
         area_entities = [
-            EcovacsAreaSensor(device, area.area_id, description, name)
+            EcovacsAreaNumber(device, area.area_id, description, name)
             for description in area_sensor_descriptions(
                 area.area_id, area_mapping=area_mapping
             )
