@@ -21,11 +21,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
 from .deebot_patch.areas import MowerArea, MowerAreaEvent
-from .deebot_patch.device import (
-    AreaParameterMapping,
-    MowerProfile,
-    profile_for_class,
-)
+from .deebot_patch.device import AreaParameterMapping, MowerProfile, profile_for
 from .entity import EcovacsDescriptionEntity
 
 
@@ -181,7 +177,7 @@ async def async_setup_area_sensors(
     for device in controller.devices:
         if device.capabilities.device_type is not DeviceType.MOWER:
             continue
-        profile = profile_for_class(device.device_info["class"])
+        profile = profile_for(device)
         if profile is None or not profile.area_parameters:
             continue
         _setup_device_area_sensors(device, config_entry, async_add_entities, profile)
