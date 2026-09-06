@@ -65,10 +65,9 @@ def test_area_sensor_uses_fixed_parameter_names() -> None:
 
 def test_a1600_representation_mapping_is_ha_owned() -> None:
     """A1600 raw-value interpretation is defined by the HA layer."""
-    mapping = _descriptions()
-    assert mapping[0].value_fn(
-        __import__(
-            "custom_components.ecovacs_mower.deebot_patch.areas",
-            fromlist=["MowerArea"],
-        ).MowerArea(area_id="2", mow_height_level=1)
+    from custom_components.ecovacs_mower.deebot_patch.areas import MowerArea
+
+    descriptions = _descriptions()
+    assert descriptions[0].value_fn(
+        MowerArea(area_id="2", mow_height_level=1)
     ) == 9.0
