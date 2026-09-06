@@ -35,8 +35,6 @@ AREA_PARAMETER_CLASSES = frozenset(
     if profile.area_parameters
 )
 
-# Named calibration helpers are retained for the patch tests and diagnostics.
-# Runtime model selection happens through MOWER_PROFILES instead.
 decode_mow_height = A1600_AREA_MAPPING.mow_height
 decode_cut_speed = A1600_AREA_MAPPING.cut_speed
 decode_obstacle_height = A1600_AREA_MAPPING.obstacle_height
@@ -97,7 +95,7 @@ class GetAreaParameter(CustomCommand):
     def _handle_response(
         self, event_bus: EventBus, response: dict[str, Any]
     ) -> HandlingResult:
-        """Merge the complete parameter response into the area snapshot."""
+        """Merge the parameter response into the area snapshot."""
         if response.get("ret") != "ok":
             return super()._handle_response(event_bus, response)
 
@@ -112,12 +110,10 @@ class GetAreaParameter(CustomCommand):
             return HandlingResult.analyse()
 
         areas = _areas_for(event_bus)
-        reported_ids: set[str] = set()
         for parameter in parameters:
             if not isinstance(parameter, dict) or parameter.get("areaID") is None:
                 continue
             area_id = str(parameter["areaID"])
-            reported_ids.add(area_id)
             current = areas.get(area_id, MowerArea(area_id))
             areas[area_id] = replace(
                 current,
@@ -127,12 +123,8 @@ class GetAreaParameter(CustomCommand):
                 angle=_as_int(parameter.get("angle")),
             )
 
-        # The parameter response is a complete snapshot. Remove stale areas,
-        # but preserve their names only for IDs still reported by the mower.
-        for area_id in tuple(areas):
-            if area_id not in reported_ids:
-                del areas[area_id]
-
+        # getAreaSet owns inventory membership. Parameters only enrich existing
+        # areas (or provide a fallback area if parameters arrive first).
         _notify(event_bus)
         return HandlingResult.success()
 
@@ -148,12 +140,7 @@ class _AreaSetFragmentBuffer:
     def add(
         self, batid: str, index: int, fragment: str, info_size: int
     ) -> bytes | None:
-        """Add a fragment and return decoded data when complete.
-
-        ``infoSize`` is the encoded payload size, not the size of the JSON after
-        decompression. Completion is therefore determined by successful
-        decompression rather than comparing decompressed length with it.
-        """
+        """Add a fragment and return decoded data when complete."""
         del info_size
         parts = self._batches.setdefault(batid, {})
         self._batches.move_to_end(batid)
@@ -231,8 +218,8 @@ class GetAreaSet(CustomCommand):
             current = areas.get(area_id, MowerArea(area_id))
             areas[area_id] = replace(current, name=name.strip())
 
-        # getAreaSet is the authoritative area inventory. An area omitted from
-        # a complete decoded response no longer exists in the mower's map.
+        # A successfully decoded ``ar`` response is the authoritative area
+        # inventory, so IDs absent from it no longer exist on the mower.
         for area_id in tuple(areas):
             if area_id not in reported_ids:
                 del areas[area_id]
