@@ -1,4 +1,4 @@
-"""Tests for mower area parameter and name parsing."""
+"""Tests for mower area state and protocol parsing."""
 
 from unittest.mock import Mock, call
 
@@ -30,10 +30,6 @@ def test_get_area_set_uses_the_expected_request() -> None:
     command = GetAreaSet()
     assert command.NAME == "getAreaSet"
     assert command._args == {"mid": "1", "aid": "0", "type": "ar"}
-
-
-def test_get_area_set_uses_the_expected_command_name() -> None:
-    assert GetAreaSet.NAME == "getAreaSet"
 
 
 def test_get_area_parameter_populates_the_authoritative_snapshot() -> None:
@@ -191,8 +187,10 @@ def test_get_area_set_ignores_malformed_rows() -> None:
         {"ret": "ok", "resp": {"body": {"data": {"subsets": "ignored"}}}},
     )
 
-    assert result.state is HandlingState.SUCCESS
-    event_bus.notify.assert_called_once_with(MowerAreaEvent(areas=()))
+    # A decoded but non-empty payload with no valid area IDs is malformed.
+    # ANALYSE prevents the invalid snapshot from replacing valid state.
+    assert result.state is HandlingState.ANALYSE
+    event_bus.notify.assert_not_called()
 
 
 def test_get_area_parameter_does_not_own_inventory_removal() -> None:
