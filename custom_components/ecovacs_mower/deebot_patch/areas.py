@@ -69,6 +69,11 @@ def _areas_for(event_bus: EventBus) -> dict[str, MowerArea]:
     return _AREA_STATE.setdefault(event_bus, {})
 
 
+def area_for(event_bus: EventBus, area_id: str) -> MowerArea | None:
+    """Return the authoritative raw state for one known area."""
+    return _areas_for(event_bus).get(area_id)
+
+
 def _notify(event_bus: EventBus) -> None:
     """Publish the state after the owning handler has updated it."""
     event_bus.notify(MowerAreaEvent(tuple(_areas_for(event_bus).values())))
@@ -264,6 +269,39 @@ class GetAreaSet(CustomCommand):
         return HandlingResult.success()
 
 
+class SetAreaParameter(CustomCommand):
+    """Set the complete raw parameter set for one mower area."""
+
+    NAME = "setAreaParameter"
+
+    def __init__(
+        self,
+        *,
+        area_id: str,
+        mow_height_level: int,
+        cut_mode: int,
+        obstacle_height: int,
+        angle: int,
+    ) -> None:
+        """Build a complete setAreaParameter request using raw mower values.
+
+        The mower expects all five area fields on every write. The caller must
+        therefore merge a changed value with the authoritative raw area state
+        before constructing this command. This class deliberately knows nothing
+        about Home Assistant units or model-specific value mappings.
+        """
+        super().__init__(
+            self.NAME,
+            {
+                "areaID": area_id,
+                "mowHeightLevel": mow_height_level,
+                "cutMode": cut_mode,
+                "obstacleHeight": obstacle_height,
+                "angle": angle,
+            },
+        )
+
+
 def reset() -> None:
     """Forget all per-device area state. Tests only."""
     _AREA_STATE.clear()
@@ -275,5 +313,7 @@ __all__ = [
     "GetAreaSet",
     "MowerArea",
     "MowerAreaEvent",
+    "SetAreaParameter",
+    "area_for",
     "reset",
 ]
