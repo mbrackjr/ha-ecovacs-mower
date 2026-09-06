@@ -1,9 +1,19 @@
 """Dynamic Home Assistant entities for mower areas.
 
 Area identity and state are owned by ``deebot_patch``. This module only turns
-that state into the four model-profile-selected area parameter views. The
-entities are dynamic because the mower reports its area IDs at runtime, just
-like the existing beacon sensors.
+that state into the four model-specific area parameter views. The entities are
+dynamic because the mower reports its area IDs at runtime, just like the
+existing beacon sensors.
+
+Model- and firmware-specific conversion from raw device values to
+human-sensible Home Assistant values lives exclusively in this HA layer. The
+A1600 LiDAR Pro findings that established these mappings are deliberately scoped
+to that model: the values have not been verified on the other mower classes
+supported by this integration.
+
+The parameter values are read-only in this change. The device requires all five
+``setAreaParameter`` fields on every write, so adding a write path before the
+read/merge state is deliberately left for a separate change.
 """
 
 from __future__ import annotations
@@ -21,8 +31,72 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
 from .deebot_patch.areas import MowerArea, MowerAreaEvent
-from .deebot_patch.device import AreaParameterMapping, MowerProfile, profile_for
+from .deebot_patch.device import MowerProfile, profile_for
 from .entity import EcovacsDescriptionEntity
+
+
+@dataclass(frozen=True)
+class AreaParameterMapping:
+    """HA representation mapping for one verified mower model."""
+
+    mow_height: Callable[[int], float | None]
+    cut_speed: Callable[[int], float | None]
+    obstacle_height: Callable[[int], int | None]
+    cut_angle: Callable[[int], int | None]
+
+
+def _a1600_mow_height(level: int) -> float | None:
+    """Convert A1600 ``mowHeightLevel`` to grass height in centimetres.
+
+    Confirmed on the A1600 LiDAR Pro specifically: levels 1–7 leave 9–3 cm of
+    grass respectively. The observed formula is ``cm = 10 - mowHeightLevel``.
+    """
+    if level not in range(1, 8):
+        return None
+    return float(10 - level)
+
+
+def _a1600_cut_speed(level: int) -> float | None:
+    """Convert A1600 ``cutMode`` to mowing speed in metres per second.
+
+    Confirmed on the A1600 LiDAR Pro specifically: levels 1–7 mean 0.70–0.40
+    m/s respectively. The observed formula is
+    ``speed_ms = 0.40 + 0.05 × (7 - cutMode)``.
+    """
+    if level not in range(1, 8):
+        return None
+    return round(0.40 + 0.05 * (7 - level), 2)
+
+
+def _a1600_obstacle_height(level: int) -> int | None:
+    """Convert A1600 ``obstacleHeight`` to the obstacle threshold in cm."""
+    return {1: 10, 2: 15, 3: 20}.get(level)
+
+
+def _a1600_cut_angle(wire_angle: int) -> int | None:
+    """Convert the A1600 wire-space angle to the app-space angle.
+
+    Confirmed on the A1600 LiDAR Pro specifically. The observed symmetric
+    conversion is ``app = (270 - wire) mod 360``; the same formula converts the
+    app value back to wire space.
+    """
+    if wire_angle not in range(360):
+        return None
+    return (270 - wire_angle) % 360
+
+
+# These mappings are presentation semantics, not protocol semantics. Keep them
+# in the HA layer and add a class only after its raw-value representation has
+# been verified independently. Do not infer that another GOAT class shares the
+# A1600 representation merely because its protocol fields have the same names.
+AREA_PARAMETER_MAPPINGS: dict[str, AreaParameterMapping] = {
+    "e4gqia": AreaParameterMapping(
+        mow_height=_a1600_mow_height,
+        cut_speed=_a1600_cut_speed,
+        obstacle_height=_a1600_obstacle_height,
+        cut_angle=_a1600_cut_angle,
+    ),
+}
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -47,6 +121,9 @@ def area_sensor_description(
         name=parameter_name,
         value_fn=value_fn,
         parameter_name=parameter_name,
+        # Keep the numeric area ID in the suggested object ID so newly created
+        # entities use a stable area-ID-based object ID instead of depending on
+        # the mower's user-editable friendly name.
         suggested_object_id=f"{area_id}_{key_suffix}",
         entity_category=EntityCategory.DIAGNOSTIC,
         **kwargs,
@@ -58,7 +135,7 @@ def area_sensor_descriptions(
     *,
     area_mapping: AreaParameterMapping,
 ) -> tuple[EcovacsAreaSensorEntityDescription, ...]:
-    """Return the four model-selected area parameter views."""
+    """Return the four model-specific area parameter views."""
     return (
         area_sensor_description(
             area_id,
@@ -123,6 +200,8 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
 
     def _set_area_name(self, area_name: str) -> None:
         """Set the integration-provided name without changing identity."""
+        # The friendly area name is deliberately part of the integration's
+        # original name. HA users can override the entity name in the registry.
         self._attr_name = f"{area_name} - {self.entity_description.parameter_name}"
 
     def set_area_name(self, area_name: str) -> None:
@@ -177,7 +256,12 @@ async def async_setup_area_sensors(
         profile = profile_for(device)
         if profile is None or not profile.area_parameters:
             continue
-        _setup_device_area_sensors(device, config_entry, async_add_entities, profile)
+        area_mapping = AREA_PARAMETER_MAPPINGS.get(profile.device_class)
+        if area_mapping is None:
+            continue
+        _setup_device_area_sensors(
+            device, config_entry, async_add_entities, profile, area_mapping
+        )
 
 
 def _setup_device_area_sensors(
@@ -185,10 +269,10 @@ def _setup_device_area_sensors(
     config_entry: EcovacsMowerConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
     profile: MowerProfile,
+    area_mapping: AreaParameterMapping,
 ) -> None:
     """Project the patch-owned area state into dynamic HA entities."""
-    assert profile.area_mapping is not None
-    area_mapping = profile.area_mapping
+    del profile
     entities: dict[str, list[EcovacsAreaSensor]] = {}
 
     def add_area(area: MowerArea) -> None:
