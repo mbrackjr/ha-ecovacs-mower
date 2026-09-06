@@ -9,6 +9,8 @@ from custom_components.ecovacs_mower.deebot_patch.areas import (
     GetAreaSet,
     MowerArea,
     MowerAreaEvent,
+    SetAreaParameter,
+    area_for,
     reset,
 )
 
@@ -30,6 +32,25 @@ def test_get_area_set_uses_the_expected_request() -> None:
     command = GetAreaSet()
     assert command.NAME == "getAreaSet"
     assert command._args == {"mid": "1", "aid": "0", "type": "ar"}
+
+
+def test_set_area_parameter_uses_all_raw_fields() -> None:
+    command = SetAreaParameter(
+        area_id="3",
+        mow_height_level=4,
+        cut_mode=6,
+        obstacle_height=2,
+        angle=90,
+    )
+
+    assert command.NAME == "setAreaParameter"
+    assert command._args == {
+        "areaID": "3",
+        "mowHeightLevel": 4,
+        "cutMode": 6,
+        "obstacleHeight": 2,
+        "angle": 90,
+    }
 
 
 def test_get_area_parameter_populates_the_authoritative_snapshot() -> None:
@@ -72,6 +93,13 @@ def test_get_area_parameter_populates_the_authoritative_snapshot() -> None:
             )
         )
     ]
+    assert area_for(event_bus, "3") == MowerArea(
+        area_id="3",
+        mow_height_level=4,
+        cut_mode=6,
+        obstacle_height=2,
+        angle=90,
+    )
 
 
 def test_get_area_set_merges_names_into_existing_parameter_state() -> None:
@@ -100,7 +128,9 @@ def test_get_area_set_merges_names_into_existing_parameter_state() -> None:
 
     event = event_bus.notify.call_args.args[0]
     assert event == MowerAreaEvent(
-        areas=(MowerArea(area_id="3", name="Front lawn", mow_height_level=4),)
+        areas=(
+            MowerArea(area_id="3", name="Front lawn", mow_height_level=4),
+        )
     )
 
 
