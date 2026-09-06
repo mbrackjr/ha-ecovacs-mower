@@ -141,3 +141,45 @@ def test_a1600_cut_angle_conversion_is_symmetric() -> None:
 
     assert description.to_raw_fn(-1) is None
     assert description.to_raw_fn(360) is None
+
+
+def test_area_write_merges_one_changed_raw_field() -> None:
+    """One writable view changes only its field in the complete raw command."""
+    from custom_components.ecovacs_mower.area_sensors import build_set_area_parameter
+    from custom_components.ecovacs_mower.deebot_patch.areas import MowerArea
+
+    command = build_set_area_parameter(
+        MowerArea(
+            area_id="2",
+            mow_height_level=4,
+            cut_mode=6,
+            obstacle_height=2,
+            angle=90,
+        ),
+        "mow_height_level",
+        7,
+    )
+
+    assert command is not None
+    assert command._args == {
+        "areaID": "2",
+        "mowHeightLevel": 7,
+        "cutMode": 6,
+        "obstacleHeight": 2,
+        "angle": 90,
+    }
+
+
+def test_area_write_refuses_incomplete_authoritative_state() -> None:
+    """A write never invents a missing raw field."""
+    from custom_components.ecovacs_mower.area_sensors import build_set_area_parameter
+    from custom_components.ecovacs_mower.deebot_patch.areas import MowerArea
+
+    assert (
+        build_set_area_parameter(
+            MowerArea(area_id="2", mow_height_level=4, cut_mode=6),
+            "mow_height_level",
+            7,
+        )
+        is None
+    )
