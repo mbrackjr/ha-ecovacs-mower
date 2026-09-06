@@ -182,6 +182,14 @@ Not included yet: **RTK diagnostics** (position and satellite data) and
 zone control. RTK is planned for the next release; the other has no
 committed date.
 
+### Area names
+
+Area names are read from the mower when the integration refreshes its area
+inventory. Renaming an area in the Ecovacs app does not update the integration
+live because `deebot-client` does not expose unsolicited `getAreaSet`
+responses. Reload the integration or restart Home Assistant after changing an
+area name to refresh it.
+
 ### When a run stops because of rain
 
 A scheduled run cut short by rain is the case where the mower's own state is
@@ -384,8 +392,8 @@ Two things worth knowing:
   minutes while a run is in progress, stopping when the mower parks. A run
   interrupted by charging needs no special case — the mower docks, the poll
   stops, and it starts again when the job resumes. The poll is also why the
-  final figure comes from elsewhere: its five-minute cadence rarely lands on the
-  last percent of a run, so the reading is completed from the job-finished
+  final figure comes from elsewhere: its five-minute cadence rarely lands on
+  the last percent of a run, so the reading is completed from the job-finished
   message the mower pushes at the same moment.
 
 `paused` is deliberately not a reason to stop asking: it is a normal mid-run
