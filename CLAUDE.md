@@ -66,9 +66,9 @@ The area capability is a dynamic exception analogous to beacon discovery: area I
 
 `getAreaSet` establishes the mower's current area inventory and friendly names. `getAreaParameter` enriches those areas with the four raw parameters. The handlers write the authoritative state before notifying the event because `EventBus.notify` deduplicates equal events before subscriber callbacks and subscriptions are asynchronous.
 
-Area entity identity is based only on numeric `areaID`. Friendly names are mutable metadata and may change without changing HA entity identity. The current implementation is read-only; future writes must use one cohesive `setAreaParameter` operation that merges a changed field into the authoritative area's complete raw state before sending the mower command.
+Area entity identity is based only on numeric `areaID`. Friendly names are mutable metadata and may change without changing HA entity identity. The current implementation has four writable A1600 views: each write must use one cohesive `setAreaParameter` operation that merges the changed field into the authoritative area's complete raw state before sending the mower command. The write path must never maintain a second per-entity copy of the other parameters.
 
-The four current area settings are exposed as dynamic `number`-appropriate views when write support is added. Do not create four independent protocol commands or four independent protocol state stores.
+The four current area settings are dynamic `number` entities because their identity/count is learned at runtime. Their HA-unit mappings remain exclusively in the HA layer and are enabled only for mower classes whose raw-value semantics have been independently validated. Do not create four independent protocol commands or four independent protocol state stores.
 
 ### The order in `EcovacsController.initialize()` is a hard invariant
 
