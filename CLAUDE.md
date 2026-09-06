@@ -46,6 +46,26 @@ Releases are cut by `.github/workflows/release.yml`, which runs after the test s
 - `authentication.py` — `AccountAuthenticator`, which renews the session from the `uid`/`accessToken` pair a login or a device verification returns instead of re-posting the password. Backport of the still-open DeebotUniverse/client.py#1743. It wraps two name-mangled privates of `_AuthClient` on the instance; the pair is persisted in `entry.data[CONF_CREDENTIALS]` by the config flow and read back by the controller. Without it, Ecovacs' `1013` answer to the password login sends the entry into an endless reauth loop (issue #21).
 - `__init__.py` — `apply()` (registers the messages, idempotent) and `verify_capabilities()`.
 
+### Device identity and model-specific capability resolution
+
+Device identity is established by `deebot-client` on `Device` creation. The patch layer must treat the device class/model as the primary capability discriminator and retain firmware as first-class identity metadata. Do not duplicate that identity as a second authoritative state store when the `Device` already owns it.
+
+`deebot_patch/device.py` is the single profile registry for patch-side model capabilities and model-specific semantics. Firmware-specific behavior must only be added when a real firmware-dependent difference has been established. Do not scatter class/model/firmware conditionals through HA platforms.
+
+Feature state belongs below HA. For dynamic mower areas, `deebot_patch` owns one authoritative `area_id -> MowerArea` snapshot containing the stable numeric area ID, optional friendly name, and raw protocol parameter values. HA must consume that snapshot and must not maintain a second authoritative copy of area state.
+
+Model-specific raw-to-HA conversions belong in the model profile. The A1600 LiDAR Pro mappings are not generic GOAT mappings and must not be generalized to another mower class without validation.
+
+### Mower area capability
+
+The area capability is a dynamic exception analogous to beacon discovery: area IDs/count are learned at runtime rather than declared in the static capability list. The patch exposes one `MowerAreaEvent` containing the complete area snapshot. Its refresh capability owns both active reads (`getAreaParameter` and `getAreaSet`); HA subscribes to that single event and requests that refresh without knowing the Ecovacs wire format.
+
+`getAreaSet` establishes the mower's current area inventory and friendly names. `getAreaParameter` enriches those areas with the four raw parameters. The handlers write the authoritative state before notifying the event because `EventBus.notify` deduplicates equal events before subscriber callbacks and subscriptions are asynchronous.
+
+Area entity identity is based only on numeric `areaID`. Friendly names are mutable metadata and may change without changing HA entity identity. The current implementation is read-only; future writes must use one cohesive `setAreaParameter` operation that merges a changed field into the authoritative area's complete raw state before sending the mower command.
+
+The four current area settings are exposed as dynamic `number`-appropriate views when write support is added. Do not create four independent protocol commands or four independent protocol state stores.
+
 ### The order in `EcovacsController.initialize()` is a hard invariant
 
 ```
@@ -67,6 +87,8 @@ Subscribing is still right for *reacting* to a state — `fault.py` and the enti
 ### Entity platforms
 
 `lawn_mower` filters on `device_type is DeviceType.MOWER`. The others (`sensor`, `switch`, `number`, `button`, `event`) are built declaratively: an `ENTITY_DESCRIPTIONS` tuple of `EcovacsCapabilityEntityDescription` subclasses with `capability_fn`, fed through `util.get_supported_entities()`. New entities are added as an entry in that tuple — not as a new class.
+
+Dynamic entities are the explicit exception when entity identity/count cannot be known until runtime, as with beacons and mower areas. Such exceptions should still reuse `EcovacsDescriptionEntity`/standard HA descriptions and remain a thin projection of patch-owned state; they must not introduce a parallel entity architecture or a second authoritative state store.
 
 `entity.py` has the base classes (`EcovacsEntity`, `EcovacsDescriptionEntity`); subscribing to events happens via `_subscribe()` in `async_added_to_hass`. Commands go out through `_execute_command()`, never `self._device.execute_command()` directly — the wrapper is what logs an unconfirmed command under this integration's own logger instead of leaving it to `deebot_client` (issue #26).
 
