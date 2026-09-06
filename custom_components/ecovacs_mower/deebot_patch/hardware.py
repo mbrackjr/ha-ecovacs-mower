@@ -107,6 +107,8 @@ async def patch_device_info(class_: str) -> None:
 
     base = await get_static_device_info(class_)
     if base is None:
+        # Upstream returns None for unknown classes; no fallback definition
+        # exists, so there is nothing to patch here.
         _LOGGER.debug("No device definition for %s, skipping patch", class_)
         return
 
@@ -121,16 +123,58 @@ async def patch_device_info(class_: str) -> None:
             action=replace(capabilities.clean.action, command=CleanMower),
         ),
         state=CapabilityEvent(StateEvent, [MowerStateRefresh()]),
+        # Only stats.clean is replaced; total and report are the library's
+        # own and are carried through by replace().
         stats=replace(
             capabilities.stats,
             clean=CapabilityEvent(StatsEvent, [GetStatsMower()]),
         ),
+        # Only the get command is replaced. types decides which lifespan
+        # entities are built and reset is the button behind them; both are the
+        # library's own and are carried through by replace(). The request keeps
+        # the same component list for the same reason the stats request keeps
+        # its name: the device answers with everything it has regardless, so
+        # widening it would buy nothing and diverge further from upstream.
         life_span=replace(
             capabilities.life_span,
             get=[GetLifeSpanMower(capabilities.life_span.types)],
         ),
     )
-
+    # Neither the protection flags nor the mowing progress is a library
+    # capability, so there is no field to hang a CapabilityEvent on and nothing
+    # to hand dataclasses.replace.
+    # get_refresh_commands() reads one mapping, built once in __post_init__ from
+    # the dataclass fields, so the entry goes straight in there — the same
+    # object.__setattr__ on the same frozen instance that __post_init__ does.
+    #
+    # Without it the event bus finds no command when the first binary sensor
+    # subscribes, and the device only pushes onProtectState when a flag flips:
+    # through a dry, uneventful spell nothing arrives at all, so the entities
+    # read "unknown" until the weather changes (issue #31). MowerRainDelayEvent
+    # is the same trap one setting over: onRainDelay arrives only when somebody
+    # changes the rain sensor, so its switch and number would sit at "unknown"
+    # until the owner next opened the app (issue #54).
+    #
+    # This has to stay below the replace() above and cannot move up: replace()
+    # re-runs __post_init__, which rebuilds the mapping from the fields, and an
+    # entry that no field describes would be dropped without a word. A future
+    # correction goes above this one for the same reason.
+    #
+    # StatsEvent (via stats.clean, above) and MowerStatsEvent (here) are two
+    # independent keys in that mapping, each carrying its own GetStatsMower.
+    # Both are first-subscribed early — StatsEvent by Device.__init__ itself,
+    # MowerStatsEvent by the progress sensor — so an unavailable->available
+    # flap, which refreshes every registered event type, sends two identical
+    # getStats requests instead of one. Accepted: deduping identical commands
+    # across event types would mean changing the event bus itself, and the
+    # cost is one extra request on a rare transition, not a wrong answer.
+    #
+    # LifeSpanEvent and MowerBeaconsEvent share the same pattern for the same
+    # getLifeSpan command: LifeSpanEvent is first-subscribed by the blade
+    # sensor, MowerBeaconsEvent by the beacon platform setup in sensor.py, so
+    # every mower — beacon-equipped or not — asks twice at startup and on
+    # every reconnect. Both parse the one answer correctly; only the extra
+    # round trip is paid.
     events = {
         **patched._events,
         MowerProtectStateEvent: [GetProtectState()],
@@ -141,9 +185,10 @@ async def patch_device_info(class_: str) -> None:
     profile = profile_for_class(class_)
     if profile is not None and profile.area_parameters:
         # One area event represents the whole area capability. The two protocol
-        # reads populate one authoritative snapshot before notifying that event.
+        # reads populate one authoritative raw snapshot before notifying it.
         events[MowerAreaEvent] = [GetAreaParameter(), GetAreaSet()]
 
     object.__setattr__(patched, "_events", MappingProxyType(events))
+
     _DEVICES[class_] = replace(base, capabilities=patched)
     _LOGGER.debug("Patched capabilities for %s", class_)
