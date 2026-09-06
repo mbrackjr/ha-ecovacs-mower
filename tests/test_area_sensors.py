@@ -6,11 +6,15 @@ pytestmark = requires_ha
 
 
 def _descriptions():
-    """Return A1600 descriptions using the explicit model mapping."""
-    from custom_components.ecovacs_mower.area_sensors import area_sensor_descriptions
-    from custom_components.ecovacs_mower.deebot_patch.device import A1600_AREA_MAPPING
+    """Return A1600 descriptions using the HA-only model mapping."""
+    from custom_components.ecovacs_mower.area_sensors import (
+        AREA_PARAMETER_MAPPINGS,
+        area_sensor_descriptions,
+    )
 
-    return area_sensor_descriptions("2", area_mapping=A1600_AREA_MAPPING)
+    return area_sensor_descriptions(
+        "2", area_mapping=AREA_PARAMETER_MAPPINGS["e4gqia"]
+    )
 
 
 def test_area_sensor_descriptions_have_stable_ids_and_icons() -> None:
@@ -57,3 +61,14 @@ def test_area_sensor_uses_fixed_parameter_names() -> None:
         "Obstacle height",
         "Cutting direction",
     ]
+
+
+def test_a1600_representation_mapping_is_ha_owned() -> None:
+    """A1600 raw-value interpretation is defined by the HA layer."""
+    mapping = _descriptions()
+    assert mapping[0].value_fn(
+        __import__(
+            "custom_components.ecovacs_mower.deebot_patch.areas",
+            fromlist=["MowerArea"],
+        ).MowerArea(area_id="2", mow_height_level=1)
+    ) == 9.0
