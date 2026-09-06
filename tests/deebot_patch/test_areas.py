@@ -32,6 +32,10 @@ def test_get_area_set_uses_the_expected_request() -> None:
     assert command._args == {"mid": "1", "aid": "0", "type": "ar"}
 
 
+def test_get_area_set_uses_the_expected_command_name() -> None:
+    assert GetAreaSet.NAME == "getAreaSet"
+
+
 def test_get_area_parameter_populates_the_authoritative_snapshot() -> None:
     event_bus = Mock()
     result = GetAreaParameter()._handle_response(
