@@ -172,7 +172,7 @@ class GetAreaSet(CustomCommand):
     def _handle_response(
         self, event_bus: EventBus, response: dict[str, Any]
     ) -> HandlingResult:
-        """Merge decoded area names into the authoritative snapshot."""
+        """Merge decoded area inventory and names into the snapshot."""
         if response.get("ret") != "ok":
             return super()._handle_response(event_bus, response)
 
@@ -208,15 +208,25 @@ class GetAreaSet(CustomCommand):
         areas = _areas_for(event_bus)
         reported_ids: set[str] = set()
         for row in decoded:
-            if not isinstance(row, list) or len(row) < 3:
+            if not isinstance(row, list) or len(row) < 2:
                 continue
-            area_id = str(row[1])
-            name = row[2]
-            if not isinstance(name, str) or not name.strip():
+            area_id = str(row[1]).strip()
+            if not area_id:
                 continue
             reported_ids.add(area_id)
-            current = areas.get(area_id, MowerArea(area_id))
-            areas[area_id] = replace(current, name=name.strip())
+            name = row[2] if len(row) >= 3 else None
+            if isinstance(name, str) and name.strip():
+                current = areas.get(area_id, MowerArea(area_id))
+                areas[area_id] = replace(current, name=name.strip())
+            elif area_id not in areas:
+                areas[area_id] = MowerArea(area_id)
+
+        # A non-empty decoded response with no valid area IDs is malformed; do
+        # not destroy the last known inventory in that case. An empty list is a
+        # valid snapshot and intentionally clears the inventory.
+        if decoded and not reported_ids:
+            _LOGGER.debug("Could not find area IDs in getAreaSet payload")
+            return HandlingResult.analyse()
 
         # A successfully decoded ``ar`` response is the authoritative area
         # inventory, so IDs absent from it no longer exist on the mower.
