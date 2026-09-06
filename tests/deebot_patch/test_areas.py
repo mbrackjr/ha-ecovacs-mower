@@ -1,4 +1,4 @@
-"""Tests for mower area parameter and name parsing."""
+"""Tests for mower area state, protocol parsing, and calibration."""
 
 from unittest.mock import Mock, call
 
@@ -8,8 +8,7 @@ from custom_components.ecovacs_mower.deebot_patch.areas import (
     GetAreaParameter,
     GetAreaSet,
     MowerArea,
-    MowerAreaNameEvent,
-    MowerAreaParameterEvent,
+    MowerAreaEvent,
     decode_cut_angle,
     decode_cut_speed,
     decode_mow_height,
@@ -31,29 +30,90 @@ def test_get_area_parameter_uses_the_expected_command_name() -> None:
     assert GetAreaParameter.NAME == "getAreaParameter"
 
 
-def test_get_area_parameter_publishes_all_verified_fields() -> None:
+def test_get_area_set_uses_the_expected_request() -> None:
+    command = GetAreaSet()
+    assert command.NAME == "getAreaSet"
+    assert command._args == {"mid": "1", "aid": "0", "type": "ar"}
+
+
+def test_get_area_parameter_populates_the_authoritative_snapshot() -> None:
     event_bus = Mock()
     result = GetAreaParameter()._handle_response(
         event_bus,
-        {"ret": "ok", "resp": {"body": {"data": {"areaParameters": [{"areaID": 3, "mowHeightLevel": 4, "cutMode": 6, "obstacleHeight": 2, "angle": 90}]}}}},
+        {
+            "ret": "ok",
+            "resp": {
+                "body": {
+                    "data": {
+                        "areaParameters": [
+                            {
+                                "areaID": 3,
+                                "mowHeightLevel": 4,
+                                "cutMode": 6,
+                                "obstacleHeight": 2,
+                                "angle": 90,
+                            }
+                        ]
+                    }
+                }
+            },
+        },
     )
 
     assert result.state is HandlingState.SUCCESS
     assert event_bus.notify.call_args_list == [
-        call(MowerAreaParameterEvent(areas=(MowerArea(area_id="3", mow_height_level=4, cut_mode=6, obstacle_height=2, angle=90),)))
+        call(
+            MowerAreaEvent(
+                areas=(
+                    MowerArea(
+                        area_id="3",
+                        mow_height_level=4,
+                        cut_mode=6,
+                        obstacle_height=2,
+                        angle=90,
+                    ),
+                )
+            )
+        )
     ]
 
 
-def test_get_area_parameter_preserves_a_previously_read_name() -> None:
+def test_get_area_set_merges_names_into_existing_parameter_state() -> None:
     event_bus = Mock()
     GetAreaParameter()._handle_response(
         event_bus,
-        {"ret": "ok", "resp": {"body": {"data": {"areaParameters": [{"areaID": 3, "mowHeightLevel": 4}]}}}},
+        {
+            "ret": "ok",
+            "resp": {
+                "body": {
+                    "data": {"areaParameters": [{"areaID": 3, "mowHeightLevel": 4}]}
+                }
+            },
+        },
     )
     event_bus.reset_mock()
 
+    command = GetAreaSet()
+    command._buffer.add = Mock(
+        return_value=b'[["123", "3", "Front lawn", [], [100, 200], [300, 400], 0]]'
+    )
+    command._handle_response(
+        event_bus,
+        {"ret": "ok", "resp": {"body": {"data": {"subsets": "ignored"}}}},
+    )
+
+    event = event_bus.notify.call_args.args[0]
+    assert event == MowerAreaEvent(
+        areas=(MowerArea(area_id="3", name="Front lawn", mow_height_level=4),)
+    )
+
+
+def test_get_area_parameter_merges_into_existing_named_state() -> None:
+    event_bus = Mock()
     area_set = GetAreaSet()
-    area_set._buffer.add = Mock(return_value=b'[["map", "3", "Front lawn", [], [], [], 0]]')
+    area_set._buffer.add = Mock(
+        return_value=b'[["123", "3", "Front lawn", [], [], [], 0]]'
+    )
     area_set._handle_response(
         event_bus,
         {"ret": "ok", "resp": {"body": {"data": {"subsets": "ignored"}}}},
@@ -62,41 +122,35 @@ def test_get_area_parameter_preserves_a_previously_read_name() -> None:
 
     GetAreaParameter()._handle_response(
         event_bus,
-        {"ret": "ok", "resp": {"body": {"data": {"areaParameters": [{"areaID": 3, "mowHeightLevel": 5}]}}}},
+        {
+            "ret": "ok",
+            "resp": {
+                "body": {
+                    "data": {
+                        "areaParameters": [
+                            {
+                                "areaID": 3,
+                                "mowHeightLevel": 5,
+                                "cutMode": 7,
+                                "obstacleHeight": 1,
+                                "angle": 56,
+                            }
+                        ]
+                    }
+                }
+            },
+        },
     )
 
     event = event_bus.notify.call_args.args[0]
-    assert event.areas[0].name == "Front lawn"
-
-
-def test_get_area_set_publishes_user_defined_names() -> None:
-    event_bus = Mock()
-    command = GetAreaSet()
-    command._buffer.add = Mock(return_value=b'[["123", "7", "Front lawn", [], [100, 200], [300, 400], 0]]')
-
-    result = command._handle_response(
-        event_bus,
-        {"ret": "ok", "resp": {"body": {"data": {"subsets": "ignored"}}}},
+    assert event.areas[0] == MowerArea(
+        area_id="3",
+        name="Front lawn",
+        mow_height_level=5,
+        cut_mode=7,
+        obstacle_height=1,
+        angle=56,
     )
-
-    assert result.state is HandlingState.SUCCESS
-    assert event_bus.notify.call_args_list == [
-        call(MowerAreaNameEvent(names=(("7", "Front lawn"),)))
-    ]
-
-
-def test_get_area_set_ignores_malformed_rows() -> None:
-    event_bus = Mock()
-    command = GetAreaSet()
-    command._buffer.add = Mock(return_value=b'[["123"], "not-a-row"]')
-
-    result = command._handle_response(
-        event_bus,
-        {"ret": "ok", "resp": {"body": {"data": {"subsets": "ignored"}}}},
-    )
-
-    assert result.state is HandlingState.SUCCESS
-    event_bus.notify.assert_not_called()
 
 
 def test_get_area_set_decodes_a1600_friendly_names() -> None:
@@ -118,13 +172,55 @@ def test_get_area_set_decodes_a1600_friendly_names() -> None:
     )
 
     event = event_bus.notify.call_args.args[0]
-    assert isinstance(event, MowerAreaNameEvent)
-    assert dict(event.names) == {
+    assert isinstance(event, MowerAreaEvent)
+    assert {area.area_id: area.name for area in event.areas} == {
         "1": "Achtertuin",
         "3": "Zijtuin",
         "2": "Voortuin",
         "4": "Laadstation",
     }
+
+
+def test_get_area_set_ignores_malformed_rows() -> None:
+    event_bus = Mock()
+    command = GetAreaSet()
+    command._buffer.add = Mock(return_value=b'[["123"], "not-a-row"]')
+
+    result = command._handle_response(
+        event_bus,
+        {"ret": "ok", "resp": {"body": {"data": {"subsets": "ignored"}}}},
+    )
+
+    assert result.state is HandlingState.SUCCESS
+    event_bus.notify.assert_called_once_with(MowerAreaEvent(areas=()))
+
+
+def test_get_area_parameter_replaces_stale_area_ids() -> None:
+    event_bus = Mock()
+    command = GetAreaParameter()
+    command._handle_response(
+        event_bus,
+        {
+            "ret": "ok",
+            "resp": {
+                "body": {
+                    "data": {"areaParameters": [{"areaID": 1}, {"areaID": 2}]}
+                }
+            },
+        },
+    )
+    event_bus.reset_mock()
+
+    command._handle_response(
+        event_bus,
+        {
+            "ret": "ok",
+            "resp": {"body": {"data": {"areaParameters": [{"areaID": 2}]}}},
+        },
+    )
+
+    event = event_bus.notify.call_args.args[0]
+    assert [area.area_id for area in event.areas] == ["2"]
 
 
 def test_a1600_mow_height_calibration() -> None:
@@ -150,7 +246,3 @@ def test_a1600_cut_angle_conversion_is_symmetric() -> None:
         wire_angle = decode_cut_angle(app_angle)
         assert wire_angle is not None
         assert decode_cut_angle(wire_angle) == app_angle
-
-
-def test_get_area_set_uses_the_expected_command_name() -> None:
-    assert GetAreaSet.NAME == "getAreaSet"
