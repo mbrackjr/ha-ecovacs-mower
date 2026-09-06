@@ -109,7 +109,9 @@ async def async_setup_entry(
     )
     if entities:
         async_add_entities(entities)
-    await async_setup_area_sensors(config_entry, async_add_entities)
+    await async_setup_area_sensors(
+        config_entry, async_add_entities, number_platform=True
+    )
 
 
 class EcovacsNumberEntity[EventT: Event](
