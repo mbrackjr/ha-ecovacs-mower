@@ -366,8 +366,19 @@ class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
 async def async_setup_area_sensors(
     config_entry: EcovacsMowerConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
+    *,
+    number_platform: bool = False,
 ) -> None:
-    """Add dynamic area parameter entities for model profiles that support them."""
+    """Add dynamic area number entities from the HA number platform.
+
+    The function name is retained because this dynamic entity module was
+    introduced while the area values were read-only sensors. The sensor
+    platform still imports it during the transition, but writable area entities
+    must only be registered by the number platform.
+    """
+    if not number_platform:
+        return
+
     controller = config_entry.runtime_data
     for device in controller.devices:
         if device.capabilities.device_type is not DeviceType.MOWER:
