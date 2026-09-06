@@ -4,8 +4,14 @@ The patch owns the mower-reported area snapshot because the upstream client does
 not model these GOAT commands yet. Home Assistant consumes the resulting state
 and does not parse the Ecovacs wire format.
 
-The A1600 LiDAR Pro parameter mappings are selected through the model profile
-rather than treated as generic GOAT behaviour.
+The area values remain raw protocol values here. Model- and firmware-specific
+conversion to human-sensible Home Assistant values belongs exclusively to the
+HA layer and must not be generalized here without validation.
+
+The area name is a separate response from ``getAreaSet``. Its ``ar`` response
+contains chunked Base64/LZMA data whose decoded rows start with map ID, area ID
+and the user-editable name. The decompressor is supplied by deebot-client; the
+patch only adds the missing command and protocol row interpretation.
 """
 
 from __future__ import annotations
@@ -22,7 +28,7 @@ from deebot_client.events.base import Event
 from deebot_client.message import HandlingResult
 from deebot_client.rs.util import decompress_base64_data
 
-from .device import A1600_AREA_MAPPING, MOWER_PROFILES
+from .device import MOWER_PROFILES
 
 if TYPE_CHECKING:
     from deebot_client.event_bus import EventBus
@@ -35,15 +41,10 @@ AREA_PARAMETER_CLASSES = frozenset(
     if profile.area_parameters
 )
 
-decode_mow_height = A1600_AREA_MAPPING.mow_height
-decode_cut_speed = A1600_AREA_MAPPING.cut_speed
-decode_obstacle_height = A1600_AREA_MAPPING.obstacle_height
-decode_cut_angle = A1600_AREA_MAPPING.cut_angle
-
 
 @dataclass(frozen=True)
 class MowerArea:
-    """Authoritative mower-reported state for one area."""
+    """The raw per-area parameters plus the optional app-defined name."""
 
     area_id: str
     name: str | None = None
@@ -55,7 +56,7 @@ class MowerArea:
 
 @dataclass(frozen=True)
 class MowerAreaEvent(Event):
-    """The latest area inventory and parameter snapshot known for one mower."""
+    """The latest area inventory and parameter snapshot known for the mower."""
 
     areas: tuple[MowerArea, ...]
 
@@ -140,7 +141,14 @@ class _AreaSetFragmentBuffer:
     def add(
         self, batid: str, index: int, fragment: str, info_size: int
     ) -> bytes | None:
-        """Add a fragment and return decoded data when complete."""
+        """Add a fragment and return decoded data when the stream is complete.
+
+        ``infoSize`` in the mower ``ar`` response is not the size of the
+        decompressed JSON returned by ``decompress_base64_data``. The A1600,
+        for example, reports ``infoSize=498`` while its decoded JSON is 196
+        bytes. Completion is therefore determined by successful decompression
+        rather than by comparing the decompressed length with ``infoSize``.
+        """
         del info_size
         parts = self._batches.setdefault(batid, {})
         self._batches.move_to_end(batid)
@@ -158,15 +166,29 @@ class _AreaSetFragmentBuffer:
 
 
 class GetAreaSet(CustomCommand):
-    """Read the mower's current area inventory and friendly names."""
+    """Read the mower's current area inventory and friendly names.
+
+    ``getAreaSet`` is not modelled by deebot-client. The response uses the
+    chunked Base64/LZMA decoder already provided by the pinned deebot-client
+    18.5.1 release. For ``ar`` the decoded rows are documented upstream as
+    ``mapID | areaID | name | neighbourIDs | 2 reference coordinates | flags``.
+    """
 
     NAME = "getAreaSet"
 
     def __init__(self) -> None:
         """Build a request for mowing areas (``ar``)."""
-        # The A1600 rejects type=ar without mid/aid. These values mirror the
-        # request emitted by the Ecovacs app.
-        super().__init__(self.NAME, {"mid": "1", "aid": "0", "type": "ar"})
+        # The GOAT expects mid/aid as well as type in the body data. A request
+        # containing only ``type=ar`` is rejected by the A1600 with
+        # ``code=20011, msg=get aid error``. This mirrors the payload emitted
+        # by the Ecovacs app and is required even though the response itself
+        # carries the area records.
+        super().__init__(
+            self.NAME,
+            {"mid": "1", "aid": "0", "type": "ar"},
+        )
+        # Keep the reassembly buffer on each command instance so multipart
+        # responses can be accumulated across asynchronous MQTT callbacks.
         self._buffer = _AreaSetFragmentBuffer()
 
     def _handle_response(
@@ -249,9 +271,5 @@ __all__ = [
     "GetAreaSet",
     "MowerArea",
     "MowerAreaEvent",
-    "decode_cut_angle",
-    "decode_cut_speed",
-    "decode_mow_height",
-    "decode_obstacle_height",
     "reset",
 ]
