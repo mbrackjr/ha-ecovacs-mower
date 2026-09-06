@@ -1,19 +1,17 @@
 """Device identity and model capability profiles for the patch layer.
 
-The patch resolves hardware identity before feature code runs. Firmware is kept
-with that identity so a future firmware-dependent behavior can be selected in
-one place without scattering version checks through the integration.
+The upstream Device already owns the authoritative device identity. This module
+provides the patch-side profile selected from that identity, so model-specific
+behaviour has one home and firmware is available for future compatibility rules.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
-from weakref import WeakKeyDictionary
 
 if TYPE_CHECKING:
     from deebot_client.device import Device
-    from deebot_client.event_bus import EventBus
 
 
 @dataclass(frozen=True)
@@ -80,7 +78,7 @@ A1600_AREA_MAPPING = AreaParameterMapping(
 
 # Class identity is the first capability discriminator. Firmware is deliberately
 # not used in profiles until a real firmware-dependent difference is established;
-# identity still retains it for that future decision.
+# the Device still retains it as part of DeviceIdentity for that future decision.
 MOWER_PROFILES: dict[str, MowerProfile] = {
     "2i0fns": MowerProfile("2i0fns"),
     "9bts2s": MowerProfile("9bts2s"),
@@ -92,24 +90,15 @@ MOWER_PROFILES: dict[str, MowerProfile] = {
     "xmp9ds": MowerProfile("xmp9ds"),
 }
 
-_IDENTITIES: WeakKeyDictionary[EventBus, DeviceIdentity] = WeakKeyDictionary()
 
-
-def register_device(device: Device) -> DeviceIdentity:
-    """Record device identity before the device starts its MQTT event stream."""
+def identity_for(device: Device) -> DeviceIdentity:
+    """Return the device identity already established by deebot-client."""
     info = device.device_info
-    identity = DeviceIdentity(
+    return DeviceIdentity(
         device_class=info["class"],
         model=info.get("deviceName"),
         firmware=device.fw_version,
     )
-    _IDENTITIES[device.events] = identity
-    return identity
-
-
-def identity_for(event_bus: EventBus) -> DeviceIdentity | None:
-    """Return the identity registered for an event bus."""
-    return _IDENTITIES.get(event_bus)
 
 
 def profile_for_class(device_class: str) -> MowerProfile | None:
@@ -117,12 +106,6 @@ def profile_for_class(device_class: str) -> MowerProfile | None:
     return MOWER_PROFILES.get(device_class)
 
 
-def profile_for(event_bus: EventBus) -> MowerProfile | None:
-    """Return the model profile selected for a registered device."""
-    identity = identity_for(event_bus)
-    return profile_for_class(identity.device_class) if identity else None
-
-
-def reset() -> None:
-    """Forget device identity. Tests only."""
-    _IDENTITIES.clear()
+def profile_for(device: Device) -> MowerProfile | None:
+    """Return the model profile selected for a device's class."""
+    return profile_for_class(device.device_info["class"])
