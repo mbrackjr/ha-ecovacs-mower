@@ -1,9 +1,8 @@
-"""Tests for mower identity and model-specific profiles."""
+"""Tests for mower identity and patch-side capability profiles."""
 
 from unittest.mock import Mock
 
 from custom_components.ecovacs_mower.deebot_patch.device import (
-    A1600_AREA_MAPPING,
     DeviceIdentity,
     identity_for,
     profile_for,
@@ -30,7 +29,6 @@ def test_profile_is_selected_by_device_class() -> None:
     profile = profile_for_class("e4gqia")
     assert profile is not None
     assert profile.area_parameters is True
-    assert profile.area_mapping is A1600_AREA_MAPPING
 
     other = profile_for_class("xmp9ds")
     assert other is not None
