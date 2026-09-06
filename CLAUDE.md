@@ -1,4 +1,4 @@
-# CLAUDE.md
+# Ecovacs Mower for Home Assistant
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -53,6 +53,8 @@ Device identity is established by `deebot-client` on `Device` creation. The patc
 `deebot_patch/device.py` is the single profile registry for patch-side capability decisions. It may decide whether a protocol capability exists for a verified device class, but it must not contain model- or firmware-specific conversion from raw device values to human-sensible Home Assistant values.
 
 **Raw-value representation boundary:** `deebot_patch` owns the Ecovacs wire format and raw protocol values only. Any model- or firmware-specific interpretation of those raw values — for example, mapping a numeric mow-height level to centimetres, a cut-mode level to metres per second, an obstacle-height code to centimetres, or a wire-space angle to an HA/app-space angle — lives exclusively in the HA layer. Such mappings must be selected there from the actual device identity and must never be generalized from one mower to another without independent validation. Firmware-specific representation is subject to the same rule even when the protocol field names are identical.
+
+**Validated-capability boundary:** A capability whose raw values or human-sensible representation has only been validated on specific mower classes must be explicitly restricted to those classes. Do not advertise, enable, or generalize that capability to other classes merely because their protocol fields look similar. Add another class only after its area data and semantics have been independently validated on that hardware.
 
 Do not scatter model/class/firmware capability conditionals through HA platforms. The HA layer may select its representation mapping from the patch/device identity, but the mapping itself belongs only to HA. The patch must not import HA modules or depend on HA units, entity semantics, or presentation values.
 
