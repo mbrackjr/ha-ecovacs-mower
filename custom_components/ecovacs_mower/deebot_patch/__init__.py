@@ -86,6 +86,8 @@ def apply() -> None:
     if not isinstance(MESSAGES, dict):
         _fail("deebot_client.messages.json.MESSAGES is not a dict")
 
+    # Mutated in place: messages/__init__.py holds a reference to the same
+    # object, so a rebinding would not be visible in get_message().
     for message in (
         OnChargeInfo,
         OnChargeState,
@@ -113,22 +115,40 @@ def apply() -> None:
 
 
 def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
-    """Confirm that the capabilities a device actually received are patched."""
+    """Confirm that the capabilities a device actually got are the patched ones.
+
+    The check runs against the object in ``DeviceInfo.static``, not against the
+    cache. That is the only check that proves the patch got in before
+    ``get_devices()`` — a cache lookup would look correct even if the device was
+    built from an unpatched definition.
+    """
     if capabilities.clean.action.command is not CleanMower:
         _fail(
             f"device {class_} was built with {capabilities.clean.action.command.__name__} "
             f"instead of CleanMower — the patch ran too late"
         )
 
+    # Exact type comparison, not isinstance: both GetCleanInfoV2 and our own
+    # classes inherit from GetCleanInfo, so isinstance() would accept exactly
+    # the unpatched set we want to catch. The check would be toothless.
+    #
+    # The length is pinned as well. A second command here is the race in issue
+    # #67 — the two answers land in one TaskGroup and the last one wins — so a
+    # GetChargeState() finding its way back into the list must fail loudly
+    # rather than quietly reintroduce the flapping.
     commands = capabilities.get_refresh_commands(StateEvent)
     if [type(command) for command in commands] != [MowerStateRefresh]:
         _fail(
             f"the state commands for {class_} are "
-            f"{[type(c).__name__ for c in commands]} instead of [MowerStateRefresh]"
+            f"{[type(c).__name__ for c in commands]} instead of "
+            f"[MowerStateRefresh]"
         )
 
     profile = profile_for_class(class_)
     if profile is not None and profile.area_parameters:
+        # One HA-facing event represents the whole area capability. Its refresh
+        # mapping deliberately contains both protocol reads; neither command
+        # interprets raw values into Home Assistant units.
         area_commands = capabilities.get_refresh_commands(MowerAreaEvent)
         if [type(command) for command in area_commands] != [
             GetAreaParameter,
