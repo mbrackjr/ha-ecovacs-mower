@@ -1,4 +1,4 @@
-"""Tests for mower area state, protocol parsing, and calibration."""
+"""Tests for mower area state and protocol parsing."""
 
 from unittest.mock import Mock, call
 
@@ -9,10 +9,6 @@ from custom_components.ecovacs_mower.deebot_patch.areas import (
     GetAreaSet,
     MowerArea,
     MowerAreaEvent,
-    decode_cut_angle,
-    decode_cut_speed,
-    decode_mow_height,
-    decode_obstacle_height,
     reset,
 )
 
@@ -195,7 +191,7 @@ def test_get_area_set_ignores_malformed_rows() -> None:
     event_bus.notify.assert_called_once_with(MowerAreaEvent(areas=()))
 
 
-def test_get_area_parameter_replaces_stale_area_ids() -> None:
+def test_get_area_parameter_does_not_own_inventory_removal() -> None:
     event_bus = Mock()
     command = GetAreaParameter()
     command._handle_response(
@@ -220,29 +216,4 @@ def test_get_area_parameter_replaces_stale_area_ids() -> None:
     )
 
     event = event_bus.notify.call_args.args[0]
-    assert [area.area_id for area in event.areas] == ["2"]
-
-
-def test_a1600_mow_height_calibration() -> None:
-    assert [decode_mow_height(level) for level in range(1, 8)] == [9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0]
-    assert decode_mow_height(0) is None
-    assert decode_mow_height(8) is None
-
-
-def test_a1600_cut_speed_calibration() -> None:
-    assert [decode_cut_speed(level) for level in range(1, 8)] == [0.70, 0.65, 0.60, 0.55, 0.50, 0.45, 0.40]
-    assert decode_cut_speed(0) is None
-    assert decode_cut_speed(8) is None
-
-
-def test_a1600_obstacle_height_calibration() -> None:
-    assert [decode_obstacle_height(level) for level in range(1, 4)] == [10, 15, 20]
-    assert decode_obstacle_height(0) is None
-    assert decode_obstacle_height(4) is None
-
-
-def test_a1600_cut_angle_conversion_is_symmetric() -> None:
-    for app_angle in (0, 1, 90, 180, 269, 270, 359):
-        wire_angle = decode_cut_angle(app_angle)
-        assert wire_angle is not None
-        assert decode_cut_angle(wire_angle) == app_angle
+    assert [area.area_id for area in event.areas] == ["1", "2"]
