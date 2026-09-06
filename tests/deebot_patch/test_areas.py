@@ -1,4 +1,4 @@
-"""Tests for mower area state and protocol parsing."""
+"""Tests for mower area parameter and name parsing."""
 
 from unittest.mock import Mock, call
 
