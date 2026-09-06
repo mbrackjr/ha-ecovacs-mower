@@ -19,7 +19,7 @@ from deebot_client.messages.json import MESSAGES
 from .areas import GetAreaParameter, GetAreaSet, MowerAreaEvent
 from .authentication import AccountAuthenticator
 from .commands import CleanMower, GetCleanInfoMower, MowerStateRefresh, has_family
-from .device import DeviceIdentity, MowerProfile, identity_for, profile_for
+from .device import DeviceIdentity, MowerProfile, identity_for, profile_for, profile_for_class
 from .families import attempted_family_name
 from .hardware import SUPPORTED_CLASSES, patch_device_info
 from .map_messages import OnArI, OnMapTrace, OnMapTrack, OnMI, OnSpecialContour
@@ -57,6 +57,7 @@ __all__ = [
     "identity_for",
     "patch_device_info",
     "profile_for",
+    "profile_for_class",
     "register_mower_bus",
     "verify_capabilities",
 ]
@@ -126,7 +127,7 @@ def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
             f"{[type(c).__name__ for c in commands]} instead of [MowerStateRefresh]"
         )
 
-    profile = profile_for(class_)
+    profile = profile_for_class(class_)
     if profile is not None and profile.area_parameters:
         area_commands = capabilities.get_refresh_commands(MowerAreaEvent)
         if [type(command) for command in area_commands] != [
