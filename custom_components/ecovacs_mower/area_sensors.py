@@ -1,9 +1,9 @@
 """Dynamic Home Assistant entities for mower areas.
 
 Area identity and state are owned by ``deebot_patch``. This module only turns
-that state into the four A1600 LiDAR Pro sensor views. The entities are dynamic
-because the mower reports its area IDs at runtime, just like the existing beacon
-sensors.
+that state into the four model-profile-selected area parameter views. The
+entities are dynamic because the mower reports its area IDs at runtime, just
+like the existing beacon sensors.
 """
 
 from __future__ import annotations
@@ -54,16 +54,11 @@ def area_sensor_description(
 
 
 def area_sensor_descriptions(
-    area_id: str = "EXAMPLE",
+    area_id: str,
     *,
-    area_mapping: AreaParameterMapping | None = None,
+    area_mapping: AreaParameterMapping,
 ) -> tuple[EcovacsAreaSensorEntityDescription, ...]:
     """Return the four model-selected area parameter views."""
-    if area_mapping is None:
-        from .deebot_patch.device import A1600_AREA_MAPPING
-
-        area_mapping = A1600_AREA_MAPPING
-
     return (
         area_sensor_description(
             area_id,
@@ -158,7 +153,9 @@ class EcovacsAreaSensor(EcovacsDescriptionEntity, SensorEntity):
 
     async def _on_area_state(self, event: MowerAreaEvent) -> None:
         """Project this area's parameter into the sensor state."""
-        area = next((area for area in event.areas if area.area_id == self._area_id), None)
+        area = next(
+            (area for area in event.areas if area.area_id == self._area_id), None
+        )
         if area is None:
             self._attr_native_value = None
         else:
@@ -223,8 +220,8 @@ def _setup_device_area_sensors(
                         entity.set_area_name(area.name)
                     entity.async_write_ha_state()
 
-        # An area removed from the mower remains as an empty entity rather than
-        # being silently deleted from HA. Numeric IDs remain stable, and entity
+        # An area removed from the mower becomes unavailable rather than being
+        # silently deleted from HA. Numeric IDs remain stable, and entity
         # removal is intentionally a user-visible lifecycle action.
         for area_id, area_entities in entities.items():
             if area_id not in reported_ids:
