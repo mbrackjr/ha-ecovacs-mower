@@ -144,6 +144,44 @@ AREA_PARAMETER_MAPPINGS: dict[str, AreaParameterMapping] = {
 }
 
 
+def build_set_area_parameter(
+    area: MowerArea, raw_field: str, raw_value: int
+) -> SetAreaParameter | None:
+    """Merge one raw change into a complete authoritative area write.
+
+    The mower requires all five raw values. Returning no command for an
+    incomplete snapshot prevents a writable HA entity from inventing defaults
+    for fields that have not been reported by the mower yet.
+    """
+    if any(
+        parameter is None
+        for parameter in (
+            area.mow_height_level,
+            area.cut_mode,
+            area.obstacle_height,
+            area.angle,
+        )
+    ):
+        return None
+
+    raw_values = {
+        "mow_height_level": area.mow_height_level,
+        "cut_mode": area.cut_mode,
+        "obstacle_height": area.obstacle_height,
+        "angle": area.angle,
+    }
+    if raw_field not in raw_values:
+        return None
+    raw_values[raw_field] = raw_value
+    return SetAreaParameter(
+        area_id=area.area_id,
+        mow_height_level=raw_values["mow_height_level"],
+        cut_mode=raw_values["cut_mode"],
+        obstacle_height=raw_values["obstacle_height"],
+        angle=raw_values["angle"],
+    )
+
+
 @dataclass(kw_only=True, frozen=True)
 class EcovacsAreaNumberEntityDescription(NumberEntityDescription):
     """Describe one dynamic writable view of one mower area."""
@@ -329,37 +367,17 @@ class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
             raise HomeAssistantError(
                 f"Area {self._area_id} has not reported its parameters yet"
             )
-        if any(
-            parameter is None
-            for parameter in (
-                area.mow_height_level,
-                area.cut_mode,
-                area.obstacle_height,
-                area.angle,
-            )
-        ):
+
+        command = build_set_area_parameter(
+            area, self.entity_description.raw_field, raw_value
+        )
+        if command is None:
             raise HomeAssistantError(
                 f"Area {self._area_id} has incomplete parameters; wait for "
                 "the mower to report all area settings"
             )
 
-        raw_values = {
-            "mow_height_level": area.mow_height_level,
-            "cut_mode": area.cut_mode,
-            "obstacle_height": area.obstacle_height,
-            "angle": area.angle,
-        }
-        raw_values[self.entity_description.raw_field] = raw_value
-
-        await self._execute_command(
-            SetAreaParameter(
-                area_id=area.area_id,
-                mow_height_level=raw_values["mow_height_level"],
-                cut_mode=raw_values["cut_mode"],
-                obstacle_height=raw_values["obstacle_height"],
-                angle=raw_values["angle"],
-            )
-        )
+        await self._execute_command(command)
         self._device.events.request_refresh(MowerAreaEvent)
 
 
