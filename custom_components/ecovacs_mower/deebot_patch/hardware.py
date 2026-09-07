@@ -21,10 +21,9 @@ from deebot_client.capabilities import CapabilityEvent
 from deebot_client.events import StateEvent, StatsEvent
 from deebot_client.hardware import _DEVICES, get_static_device_info
 
+from .areas import GetAreaParameter, GetAreaSet, MowerAreaEvent
 from .commands import (
     CleanMower,
-    GetAreaParameter,
-    GetAreaSet,
     GetLifeSpanMower,
     GetProtectState,
     GetRainDelay,
@@ -212,11 +211,6 @@ async def patch_device_info(class_: str) -> None:
     }
     profile = profile_for_class(class_)
     if profile is not None and profile.area_parameters:
-        # Import lazily to keep the profile registry independent from the
-        # dynamic area-state module. The hardware patch is the consumer of both
-        # concerns, so the dependency remains one-way at module import time.
-        from .areas import MowerAreaEvent
-
         # One area event represents the whole area capability. The two protocol
         # reads populate one authoritative raw snapshot before notifying it.
         events[MowerAreaEvent] = [GetAreaParameter(), GetAreaSet()]
