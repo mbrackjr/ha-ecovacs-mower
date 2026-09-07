@@ -5,14 +5,15 @@ device module. By letting the library build its own definition, swapping out the
 broken parts and putting the result back, we avoid monkeypatching any function —
 we use the same mechanism the library itself uses.
 
-The patch's device profiles are kept separately in ``device.py``. This module
-only applies the protocol corrections and wires the corresponding refresh
-commands into the library's capability graph.
+This module also owns the supported mower-class profiles. The profile records
+only integration capabilities that have been independently validated for a
+specific class; raw protocol parsing remains in the patch commands and
+human-facing interpretation remains in the HA layer.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import logging
 from types import MappingProxyType
 
@@ -20,16 +21,17 @@ from deebot_client.capabilities import CapabilityEvent
 from deebot_client.events import StateEvent, StatsEvent
 from deebot_client.hardware import _DEVICES, get_static_device_info
 
-from .areas import GetAreaParameter, GetAreaSet, MowerAreaEvent
+from .areas import MowerAreaEvent
 from .commands import (
     CleanMower,
+    GetAreaParameter,
+    GetAreaSet,
     GetLifeSpanMower,
     GetProtectState,
     GetRainDelay,
     GetStatsMower,
     MowerStateRefresh,
 )
-from .device import MOWER_PROFILES, profile_for_class
 from .messages import (
     MowerBeaconsEvent,
     MowerProtectStateEvent,
@@ -38,6 +40,15 @@ from .messages import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MowerProfile:
+    """Validated integration capabilities for one supported mower class."""
+
+    device_class: str
+    area_parameters: bool = False
+
 
 # Device classes this integration patches, and how each one was confirmed:
 #   2i0fns — GOAT O1200 LiDAR Pro (owner-verified)
@@ -65,7 +76,25 @@ _LOGGER = logging.getLogger(__name__)
 #            xmp9ds.py is byte-identical to 9bts2s.py apart from the docstring,
 #            which here names the model outright ("DEEBOT GOAT A1600 RTK
 #            Capabilities"), so the O800 RTK's patch applies unchanged.
-SUPPORTED_CLASSES = tuple(MOWER_PROFILES)
+#
+# Presence in this mapping means the class is supported by the integration.
+# Capability flags are deliberately narrower: they are enabled only where the
+# corresponding behavior or raw-value semantics have been independently
+# validated on that class. Similar protocol field names on another class are
+# not sufficient evidence to enable a capability there.
+SUPPORTED_CLASSES: dict[str, MowerProfile] = {
+    "2i0fns": MowerProfile("2i0fns"),
+    "9bts2s": MowerProfile("9bts2s"),
+    "2px96q": MowerProfile("2px96q"),
+    "77atlz": MowerProfile("77atlz"),
+    "e4gqia": MowerProfile("e4gqia", area_parameters=True),
+    "xmp9ds": MowerProfile("xmp9ds"),
+}
+
+
+def profile_for_class(class_: str) -> MowerProfile | None:
+    """Return the validated integration profile for a device class."""
+    return SUPPORTED_CLASSES.get(class_)
 
 
 async def patch_device_info(class_: str) -> None:
