@@ -7,7 +7,7 @@ we use the same mechanism the library itself uses.
 
 This module also owns the supported mower-class profiles. The profile records
 only integration capabilities that have been independently validated for a
-specific class; raw protocol parsing remains in the patch commands and
+specific class; raw protocol parsing remains in the patch layer and
 human-facing interpretation remains in the HA layer.
 """
 
@@ -62,7 +62,7 @@ class MowerProfile:
 #            answers errno 500 on every poll and clean is never acknowledged;
 #            unpatched, getCleanInfo_V2 answers first try and clean_V2 is
 #            acked in 526 ms. The class stays here because the family is now
-#            chosen at runtime rather than by this tuple — see families.py.
+#            chosen at runtime rather than by this registry — see families.py.
 #   e4gqia — GOAT A1600 LiDAR Pro (confirmed, PR #29, firmware 1.11.31).
 #            Upstream names this A3000 LiDAR Pro; its module is byte-identical
 #            to 9bts2s.py apart from the docstring, so the O800's patch
