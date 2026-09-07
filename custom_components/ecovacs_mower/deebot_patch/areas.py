@@ -1,4 +1,4 @@
-"""Mower area state and protocol parsing missing from deebot-client.
+"""Mower area state and commands missing from deebot-client.
 
 The patch owns the mower-reported area snapshot because the upstream client does
 not model these GOAT commands yet. Home Assistant consumes the resulting state
@@ -11,7 +11,7 @@ HA layer and must not be generalized here without validation.
 The area name is a separate response from ``getAreaSet``. Its ``ar`` response
 contains chunked Base64/LZMA data whose decoded rows start with map ID, area ID
 and the user-editable name. The decompressor is supplied by deebot-client; the
-patch only adds the missing protocol row interpretation.
+patch only adds the missing command and protocol row interpretation.
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ from typing import TYPE_CHECKING, Any
 from weakref import WeakKeyDictionary
 
 import orjson
+from deebot_client.commands.json.custom import CustomCommand
 from deebot_client.events.base import Event
 from deebot_client.message import HandlingResult
 from deebot_client.rs.util import decompress_base64_data
 
-from .commands import GetAreaParameter, GetAreaSet, SetAreaParameter
-from .hardware import SUPPORTED_CLASSES
+from .device import MOWER_PROFILES
 
 if TYPE_CHECKING:
     from deebot_client.event_bus import EventBus
@@ -37,7 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 
 AREA_PARAMETER_CLASSES = frozenset(
     device_class
-    for device_class, profile in SUPPORTED_CLASSES.items()
+    for device_class, profile in MOWER_PROFILES.items()
     if profile.area_parameters
 )
 
@@ -89,6 +89,52 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+class GetAreaParameter(CustomCommand):
+    """Read all per-area mowing parameters from the mower."""
+
+    NAME = "getAreaParameter"
+
+    def __init__(self) -> None:
+        """Build the empty getAreaParameter request."""
+        super().__init__(self.NAME, {})
+
+    def _handle_response(
+        self, event_bus: EventBus, response: dict[str, Any]
+    ) -> HandlingResult:
+        """Merge the parameter response into the area snapshot."""
+        if response.get("ret") != "ok":
+            return super()._handle_response(event_bus, response)
+
+        try:
+            parameters = response["resp"]["body"]["data"]["areaParameters"]
+        except (KeyError, TypeError):
+            _LOGGER.debug("Unexpected getAreaParameter response: %r", response)
+            return HandlingResult.analyse()
+
+        if not isinstance(parameters, list):
+            _LOGGER.debug("Unexpected areaParameters value: %r", parameters)
+            return HandlingResult.analyse()
+
+        areas = _areas_for(event_bus)
+        for parameter in parameters:
+            if not isinstance(parameter, dict) or parameter.get("areaID") is None:
+                continue
+            area_id = str(parameter["areaID"])
+            current = areas.get(area_id, MowerArea(area_id))
+            areas[area_id] = replace(
+                current,
+                mow_height_level=_as_int(parameter.get("mowHeightLevel")),
+                cut_mode=_as_int(parameter.get("cutMode")),
+                obstacle_height=_as_int(parameter.get("obstacleHeight")),
+                angle=_as_int(parameter.get("angle")),
+            )
+
+        # getAreaSet owns inventory membership. Parameters only enrich existing
+        # areas (or provide a fallback area if parameters arrive first).
+        _notify(event_bus)
+        return HandlingResult.success()
+
+
 class _AreaSetFragmentBuffer:
     """Reassemble multipart area-set data using deebot-client's decoder."""
 
@@ -124,19 +170,42 @@ class _AreaSetFragmentBuffer:
         return blob
 
 
-class GetAreaSetHandler:
-    """Handle the mower's multipart area inventory response."""
+class GetAreaSet(CustomCommand):
+    """Read the mower's current area inventory and friendly names.
+
+    ``getAreaSet`` is not modelled by deebot-client. The response uses the
+    chunked Base64/LZMA decoder already provided by the pinned deebot-client
+    18.5.1 release. For ``ar`` the decoded rows are documented upstream as
+    ``mapID | areaID | name | neighbourIDs | 2 reference coordinates | flags``.
+    """
+
+    NAME = "getAreaSet"
 
     def __init__(self) -> None:
-        """Create a fresh reassembly buffer for one command instance."""
+        """Build a request for mowing areas (``ar``)."""
+        # The GOAT expects mid/aid as well as type in the body data. A request
+        # containing only ``type=ar`` is rejected by the A1600 with
+        # ``code=20011, msg=get aid error``. This mirrors the payload emitted
+        # by the Ecovacs app and is required even though the response itself
+        # carries the area records.
+        super().__init__(
+            self.NAME,
+            {"mid": "1", "aid": "0", "type": "ar"},
+        )
+        # Keep the reassembly buffer on each command instance so multipart
+        # responses can be accumulated across asynchronous MQTT callbacks.
         self._buffer = _AreaSetFragmentBuffer()
 
-    def handle(
+    def _handle_response(
         self, event_bus: EventBus, response: dict[str, Any]
     ) -> HandlingResult:
+        # The Ecovacs app can issue getAreaSet independently. deebot-client only
+        # dispatches P2P responses associated with commands issued by this
+        # client, so app-originated responses are not visible here. Reloading
+        # the integration or restarting Home Assistant triggers a normal refresh.
         """Merge decoded area inventory and names into the snapshot."""
         if response.get("ret") != "ok":
-            return HandlingResult.analyse()
+            return super()._handle_response(event_bus, response)
 
         try:
             data = response["resp"]["body"]["data"]
@@ -200,49 +269,38 @@ class GetAreaSetHandler:
         return HandlingResult.success()
 
 
-class GetAreaParameterHandler:
-    """Handle the mower's raw per-area parameter response."""
+class SetAreaParameter(CustomCommand):
+    """Set the complete raw parameter set for one mower area."""
 
-    def handle(
-        self, event_bus: EventBus, response: dict[str, Any]
-    ) -> HandlingResult:
-        """Merge the parameter response into the area snapshot."""
-        if response.get("ret") != "ok":
-            return HandlingResult.analyse()
+    NAME = "setAreaParameter"
 
-        try:
-            parameters = response["resp"]["body"]["data"]["areaParameters"]
-        except (KeyError, TypeError):
-            _LOGGER.debug("Unexpected getAreaParameter response: %r", response)
-            return HandlingResult.analyse()
+    def __init__(
+        self,
+        *,
+        area_id: str,
+        mow_height_level: int,
+        cut_mode: int,
+        obstacle_height: int,
+        angle: int,
+    ) -> None:
+        """Build a complete setAreaParameter request using raw mower values.
 
-        if not isinstance(parameters, list):
-            _LOGGER.debug("Unexpected areaParameters value: %r", parameters)
-            return HandlingResult.analyse()
+        The mower expects all five area fields on every write. The caller must
+        therefore merge a changed value with the authoritative raw area state
+        before constructing this command. This class deliberately knows nothing
+        about Home Assistant units or model-specific value mappings.
+        """
+        super().__init__(
+            self.NAME,
+            {
+                "areaID": area_id,
+                "mowHeightLevel": mow_height_level,
+                "cutMode": cut_mode,
+                "obstacleHeight": obstacle_height,
+                "angle": angle,
+            },
+        )
 
-        areas = _areas_for(event_bus)
-        for parameter in parameters:
-            if not isinstance(parameter, dict) or parameter.get("areaID") is None:
-                continue
-            area_id = str(parameter["areaID"])
-            current = areas.get(area_id, MowerArea(area_id))
-            areas[area_id] = replace(
-                current,
-                mow_height_level=_as_int(parameter.get("mowHeightLevel")),
-                cut_mode=_as_int(parameter.get("cutMode")),
-                obstacle_height=_as_int(parameter.get("obstacleHeight")),
-                angle=_as_int(parameter.get("angle")),
-            )
-
-        # getAreaSet owns inventory membership. Parameters only enrich existing
-        # areas (or provide a fallback area if parameters arrive first).
-        _notify(event_bus)
-        return HandlingResult.success()
-
-
-# The protocol command classes live in commands.py with the rest of the patch
-# commands. These handler helpers are intentionally kept here because they own
-# the authoritative area-state interpretation, not the command construction.
 
 def reset() -> None:
     """Forget all per-device area state. Tests only."""
@@ -251,8 +309,8 @@ def reset() -> None:
 
 __all__ = [
     "AREA_PARAMETER_CLASSES",
-    "GetAreaParameterHandler",
-    "GetAreaSetHandler",
+    "GetAreaParameter",
+    "GetAreaSet",
     "MowerArea",
     "MowerAreaEvent",
     "SetAreaParameter",
