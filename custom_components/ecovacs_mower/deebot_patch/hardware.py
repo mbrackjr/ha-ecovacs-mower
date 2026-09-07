@@ -21,9 +21,11 @@ from deebot_client.capabilities import CapabilityEvent
 from deebot_client.events import StateEvent, StatsEvent
 from deebot_client.hardware import _DEVICES, get_static_device_info
 
-from .areas import GetAreaParameter, GetAreaSet, MowerAreaEvent
+from .areas import MowerAreaEvent
 from .commands import (
     CleanMower,
+    GetAreaParameter,
+    GetAreaSet,
     GetLifeSpanMower,
     GetProtectState,
     GetRainDelay,

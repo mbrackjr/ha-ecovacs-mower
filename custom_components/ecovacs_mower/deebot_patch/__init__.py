@@ -16,9 +16,16 @@ from deebot_client.events import StateEvent
 from deebot_client.hardware import _DEVICES
 from deebot_client.messages.json import MESSAGES
 
-from .areas import GetAreaParameter, GetAreaSet, MowerAreaEvent
+from .areas import MowerAreaEvent
 from .authentication import AccountAuthenticator
-from .commands import CleanMower, GetCleanInfoMower, MowerStateRefresh, has_family
+from .commands import (
+    CleanMower,
+    GetAreaParameter,
+    GetAreaSet,
+    GetCleanInfoMower,
+    MowerStateRefresh,
+    has_family,
+)
 from .families import attempted_family_name
 from .hardware import SUPPORTED_CLASSES, patch_device_info, profile_for_class
 from .map_messages import OnArI, OnMapTrace, OnMapTrack, OnMI, OnSpecialContour
