@@ -19,9 +19,8 @@ from deebot_client.messages.json import MESSAGES
 from .areas import GetAreaParameter, GetAreaSet, MowerAreaEvent
 from .authentication import AccountAuthenticator
 from .commands import CleanMower, GetCleanInfoMower, MowerStateRefresh, has_family
-from .device import DeviceIdentity, MowerProfile, identity_for, profile_for, profile_for_class
 from .families import attempted_family_name
-from .hardware import SUPPORTED_CLASSES, patch_device_info
+from .hardware import SUPPORTED_CLASSES, patch_device_info, profile_for_class
 from .map_messages import OnArI, OnMapTrace, OnMapTrack, OnMI, OnSpecialContour
 from .messages import (
     OnChargeInfo,
@@ -43,20 +42,16 @@ __all__ = [
     "SUPPORTED_CLASSES",
     "AccountAuthenticator",
     "CleanMower",
-    "DeviceIdentity",
     "GetAreaParameter",
     "GetAreaSet",
     "GetCleanInfoMower",
     "MowerAreaEvent",
-    "MowerProfile",
     "MowerStateRefresh",
     "PatchContractError",
     "apply",
     "attempted_family_name",
     "has_family",
-    "identity_for",
     "patch_device_info",
-    "profile_for",
     "profile_for_class",
     "register_mower_bus",
     "verify_capabilities",
