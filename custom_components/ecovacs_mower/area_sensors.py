@@ -39,7 +39,7 @@ from .deebot_patch.areas import (
     SetAreaParameter,
     area_for,
 )
-from .deebot_patch.device import profile_for
+from .deebot_patch.hardware import profile_for_class
 from .entity import EcovacsDescriptionEntity
 
 
@@ -401,7 +401,7 @@ async def async_setup_area_sensors(
     for device in controller.devices:
         if device.capabilities.device_type is not DeviceType.MOWER:
             continue
-        profile = profile_for(device)
+        profile = profile_for_class(device.device_info["class"])
         if profile is None or not profile.area_parameters:
             continue
         area_mapping = AREA_PARAMETER_MAPPINGS.get(profile.device_class)
