@@ -56,6 +56,19 @@ class AreaParameterLookup:
     values: tuple[float | int, ...]
     raw_start: int = 1
 
+    def __post_init__(self) -> None:
+        """Reject lookup tables that cannot be exposed as a HA number step."""
+        if not self.values:
+            raise ValueError("Area parameter lookup must contain at least one value")
+        if len(self.values) < 2:
+            return
+        steps = {
+            round(float(b) - float(a), 10)
+            for a, b in zip(self.values, self.values[1:], strict=True)
+        }
+        if len(steps) != 1 or not steps or next(iter(steps)) == 0:
+            raise ValueError("Area parameter lookup values must have one non-zero step")
+
     @property
     def raw_end(self) -> int:
         """Return the highest raw value represented by this lookup."""
@@ -72,19 +85,11 @@ class AreaParameterLookup:
         return float(max(self.values))
 
     @property
-    def native_step(self) -> float | None:
-        """Return the HA step when the lookup values form a regular sequence."""
+    def native_step(self) -> float:
+        """Return the HA step represented by this lookup."""
         if len(self.values) < 2:
-            return None
-
-        steps = {
-            round(float(b) - float(a), 10)
-            for a, b in zip(self.values, self.values[1:], strict=True)
-        }
-        if len(steps) != 1:
-            return None
-
-        return abs(steps.pop())
+            return 1.0
+        return abs(round(float(self.values[1]) - float(self.values[0]), 10))
 
     def to_native(self, raw_value: int) -> float | int | None:
         """Convert a raw mower value to its HA representation."""
