@@ -76,7 +76,39 @@ def test_a1600_representation_mapping_is_ha_owned() -> None:
     descriptions = _descriptions()
     assert descriptions[0].value_fn(
         MowerArea(area_id="2", mow_height_level=1)
-    ) == 9.0
+    ) == 9
+
+
+def test_a1600_lookup_mapping_derives_number_metadata() -> None:
+    """Lookup values provide conversion and the HA number range/step metadata."""
+    descriptions = _descriptions()
+
+    assert (descriptions[0].native_min_value, descriptions[0].native_max_value, descriptions[0].native_step) == (3.0, 9.0, 1.0)
+    assert (descriptions[1].native_min_value, descriptions[1].native_max_value, descriptions[1].native_step) == (0.40, 0.70, 0.05)
+    assert (descriptions[2].native_min_value, descriptions[2].native_max_value, descriptions[2].native_step) == (10.0, 20.0, 5.0)
+    assert (descriptions[3].native_min_value, descriptions[3].native_max_value, descriptions[3].native_step) == (0, 359, 1)
+
+
+def test_area_parameter_lookup_round_trips_and_derives_raw_range() -> None:
+    """A lookup reverses the same validated table for writable values."""
+    from custom_components.ecovacs_mower.area_sensors import (
+        AREA_PARAMETER_MAPPINGS,
+    )
+
+    mapping = AREA_PARAMETER_MAPPINGS["e4gqia"]
+
+    assert mapping.mow_height.raw_start == 1
+    assert mapping.mow_height.raw_end == 7
+    assert [mapping.mow_height.to_native(raw) for raw in range(1, 8)] == [
+        9, 8, 7, 6, 5, 4, 3
+    ]
+    assert [mapping.mow_height.to_raw(value) for value in range(3, 10)] == [
+        7, 6, 5, 4, 3, 2, 1
+    ]
+    assert mapping.mow_height.to_native(0) is None
+    assert mapping.mow_height.to_native(8) is None
+    assert mapping.mow_height.to_raw(2) is None
+    assert mapping.mow_height.to_raw(10) is None
 
 
 def test_a1600_mow_height_calibration() -> None:
@@ -87,7 +119,7 @@ def test_a1600_mow_height_calibration() -> None:
     assert [
         description.value_fn(MowerArea(area_id="2", mow_height_level=level))
         for level in range(1, 8)
-    ] == [9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0]
+    ] == [9, 8, 7, 6, 5, 4, 3]
     assert description.value_fn(MowerArea(area_id="2", mow_height_level=0)) is None
     assert description.value_fn(MowerArea(area_id="2", mow_height_level=8)) is None
     assert [description.to_raw_fn(value) for value in range(3, 10)] == [7, 6, 5, 4, 3, 2, 1]
