@@ -28,7 +28,7 @@ from deebot_client.events.base import Event
 from deebot_client.message import HandlingResult
 from deebot_client.rs.util import decompress_base64_data
 
-from .device import MOWER_PROFILES
+from .hardware import SUPPORTED_CLASSES
 
 if TYPE_CHECKING:
     from deebot_client.event_bus import EventBus
@@ -37,7 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 
 AREA_PARAMETER_CLASSES = frozenset(
     device_class
-    for device_class, profile in MOWER_PROFILES.items()
+    for device_class, profile in SUPPORTED_CLASSES.items()
     if profile.area_parameters
 )
 
