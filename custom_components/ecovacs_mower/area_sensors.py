@@ -44,67 +44,113 @@ from .entity import EcovacsDescriptionEntity
 
 
 @dataclass(frozen=True)
+class AreaParameterLookup:
+    """Validated raw-value lookup for one mower model parameter.
+
+    ``values`` is ordered by raw protocol value, starting at ``raw_start``.
+    Add a lookup here only when the complete raw-to-HA representation has been
+    independently verified on the specific mower model. Do not reuse a lookup
+    for another model merely because the Ecovacs field has the same name.
+    """
+
+    values: tuple[float | int, ...]
+    raw_start: int = 1
+
+    @property
+    def raw_end(self) -> int:
+        """Return the highest raw value represented by this lookup."""
+        return self.raw_start + len(self.values) - 1
+
+    @property
+    def native_min_value(self) -> float:
+        """Return the lowest Home Assistant value represented."""
+        return float(min(self.values))
+
+    @property
+    def native_max_value(self) -> float:
+        """Return the highest Home Assistant value represented."""
+        return float(max(self.values))
+
+    @property
+    def native_step(self) -> float | None:
+        """Return the HA step when the lookup values form a regular sequence."""
+        if len(self.values) < 2:
+            return None
+
+        steps = {
+            round(float(b) - float(a), 10)
+            for a, b in zip(self.values, self.values[1:], strict=True)
+        }
+        if len(steps) != 1:
+            return None
+
+        return abs(steps.pop())
+
+    def to_native(self, raw_value: int) -> float | int | None:
+        """Convert a raw mower value to its HA representation."""
+        index = raw_value - self.raw_start
+        if index < 0 or index >= len(self.values):
+            return None
+        return self.values[index]
+
+    def to_raw(self, native_value: float) -> int | None:
+        """Convert an HA value to its raw mower representation."""
+        for index, value in enumerate(self.values):
+            if float(value) == native_value:
+                return self.raw_start + index
+        return None
+
+
+@dataclass(frozen=True)
+class AreaParameterFormula:
+    """Validated formula conversion for one mower model parameter.
+
+    Use this when the verified representation is a mathematical conversion
+    rather than a finite raw-value lookup. A formula is still model-specific:
+    create a separate one when another mower is independently verified to use a
+    different formula. Keep HA range and step metadata here so the generic
+    entity-description builder contains no model-specific values.
+    """
+
+    to_native: Callable[[int], float | int | None]
+    to_raw: Callable[[float], int | None]
+    native_min_value: float
+    native_max_value: float
+    native_step: float
+
+
+@dataclass(frozen=True)
 class AreaParameterMapping:
-    """HA representation mapping for one verified mower model."""
+    """HA representation mappings for one verified mower model.
 
-    mow_height: Callable[[int], float | None]
-    mow_height_to_raw: Callable[[float], int | None]
-    cut_speed: Callable[[int], float | None]
-    cut_speed_to_raw: Callable[[float], int | None]
-    obstacle_height: Callable[[int], int | None]
-    obstacle_height_to_raw: Callable[[float], int | None]
-    cut_angle: Callable[[int], int | None]
-    cut_angle_to_raw: Callable[[float], int | None]
-
-
-def _a1600_mow_height(level: int) -> float | None:
-    """Convert A1600 ``mowHeightLevel`` to grass height in centimetres.
-
-    Confirmed on the A1600 LiDAR Pro specifically: levels 1–7 leave 9–3 cm of
-    grass respectively. The observed formula is ``cm = 10 - mowHeightLevel``.
+    The first three parameters are finite raw-value lookups. The angle is kept
+    as a formula because its verified representation is a coordinate transform
+    rather than a simple value table. When adding another mower model, add its
+    own ``AreaParameterMapping`` entry and provide independently verified
+    mappings for all four parameters; do not inherit A1600 values by default.
     """
-    if level not in range(1, 8):
-        return None
-    return float(10 - level)
+
+    mow_height: AreaParameterLookup
+    cut_speed: AreaParameterLookup
+    obstacle_height: AreaParameterLookup
+    cut_angle: AreaParameterFormula
 
 
-def _a1600_mow_height_to_raw(value: float) -> int | None:
-    """Convert an A1600 cutting height in cm to its raw level."""
-    if value not in range(3, 10):
-        return None
-    return int(10 - value)
+# The following three tables are the A1600 LiDAR Pro's validated HA
+# representations. Each tuple position corresponds to a raw value beginning at
+# one. The tuple is therefore the single source of truth for conversion in both
+# directions and for the HA number entity's min/max/step metadata.
+_A1600_MOW_HEIGHT = AreaParameterLookup(
+    values=(9, 8, 7, 6, 5, 4, 3),
+)
 
+_A1600_CUT_SPEED = AreaParameterLookup(
+    values=(0.70, 0.65, 0.60, 0.55, 0.50, 0.45, 0.40),
+)
 
-def _a1600_cut_speed(level: int) -> float | None:
-    """Convert A1600 ``cutMode`` to mowing speed in metres per second.
-
-    Confirmed on the A1600 LiDAR Pro specifically: levels 1–7 mean 0.70–0.40
-    m/s respectively. The observed formula is
-    ``speed_ms = 0.40 + 0.05 × (7 - cutMode)``.
-    """
-    if level not in range(1, 8):
-        return None
-    return round(0.40 + 0.05 * (7 - level), 2)
-
-
-def _a1600_cut_speed_to_raw(value: float) -> int | None:
-    """Convert an A1600 mowing speed in m/s to its raw level."""
-    if value < 0.40 or value > 0.70:
-        return None
-    level = round(7 - ((value - 0.40) / 0.05))
-    if level not in range(1, 8) or _a1600_cut_speed(level) != round(value, 2):
-        return None
-    return level
-
-
-def _a1600_obstacle_height(level: int) -> int | None:
-    """Convert A1600 ``obstacleHeight`` to the obstacle threshold in cm."""
-    return {1: 10, 2: 15, 3: 20}.get(level)
-
-
-def _a1600_obstacle_height_to_raw(value: float) -> int | None:
-    """Convert an A1600 obstacle threshold in cm to its raw level."""
-    return {10: 1, 15: 2, 20: 3}.get(value)
+_A1600_OBSTACLE_HEIGHT = AreaParameterLookup(
+    values=(10, 15, 20),
+)
 
 
 def _a1600_cut_angle(wire_angle: int) -> int | None:
@@ -126,20 +172,31 @@ def _a1600_cut_angle_to_raw(value: float) -> int | None:
     return int((270 - value) % 360)
 
 
+_A1600_CUT_ANGLE = AreaParameterFormula(
+    to_native=_a1600_cut_angle,
+    to_raw=_a1600_cut_angle_to_raw,
+    native_min_value=0,
+    native_max_value=359,
+    native_step=1,
+)
+
+
 # These mappings are presentation semantics, not protocol semantics. Keep them
 # in the HA layer and add a class only after its raw-value representation has
 # been verified independently. Do not infer that another GOAT class shares the
 # A1600 representation merely because its protocol fields have the same names.
+#
+# To support another model, add one explicit entry here. Populate each lookup
+# from that model's independently verified raw values, in raw-value order, and
+# provide its verified angle formula (or a separate formula definition). The
+# generic entity code below derives conversion and number limits from these
+# mappings; no model-specific ranges belong in ``area_sensor_descriptions``.
 AREA_PARAMETER_MAPPINGS: dict[str, AreaParameterMapping] = {
     "e4gqia": AreaParameterMapping(
-        mow_height=_a1600_mow_height,
-        mow_height_to_raw=_a1600_mow_height_to_raw,
-        cut_speed=_a1600_cut_speed,
-        cut_speed_to_raw=_a1600_cut_speed_to_raw,
-        obstacle_height=_a1600_obstacle_height,
-        obstacle_height_to_raw=_a1600_obstacle_height_to_raw,
-        cut_angle=_a1600_cut_angle,
-        cut_angle_to_raw=_a1600_cut_angle_to_raw,
+        mow_height=_A1600_MOW_HEIGHT,
+        cut_speed=_A1600_CUT_SPEED,
+        obstacle_height=_A1600_OBSTACLE_HEIGHT,
+        cut_angle=_A1600_CUT_ANGLE,
     ),
 }
 
@@ -231,13 +288,13 @@ def area_sensor_descriptions(
             "cutting_height",
             "Cutting height",
             "mow_height_level",
-            lambda area: area_mapping.mow_height(area.mow_height_level)
+            lambda area: area_mapping.mow_height.to_native(area.mow_height_level)
             if area.mow_height_level is not None
             else None,
-            area_mapping.mow_height_to_raw,
-            native_min_value=3,
-            native_max_value=9,
-            native_step=1,
+            area_mapping.mow_height.to_raw,
+            native_min_value=area_mapping.mow_height.native_min_value,
+            native_max_value=area_mapping.mow_height.native_max_value,
+            native_step=area_mapping.mow_height.native_step,
             native_unit_of_measurement=UnitOfLength.CENTIMETERS,
             icon="mdi:grass",
         ),
@@ -246,13 +303,13 @@ def area_sensor_descriptions(
             "mowing_speed",
             "Mowing speed",
             "cut_mode",
-            lambda area: area_mapping.cut_speed(area.cut_mode)
+            lambda area: area_mapping.cut_speed.to_native(area.cut_mode)
             if area.cut_mode is not None
             else None,
-            area_mapping.cut_speed_to_raw,
-            native_min_value=0.40,
-            native_max_value=0.70,
-            native_step=0.05,
+            area_mapping.cut_speed.to_raw,
+            native_min_value=area_mapping.cut_speed.native_min_value,
+            native_max_value=area_mapping.cut_speed.native_max_value,
+            native_step=area_mapping.cut_speed.native_step,
             native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
             icon="mdi:speedometer",
         ),
@@ -261,13 +318,13 @@ def area_sensor_descriptions(
             "obstacle_height",
             "Obstacle height",
             "obstacle_height",
-            lambda area: area_mapping.obstacle_height(area.obstacle_height)
+            lambda area: area_mapping.obstacle_height.to_native(area.obstacle_height)
             if area.obstacle_height is not None
             else None,
-            area_mapping.obstacle_height_to_raw,
-            native_min_value=10,
-            native_max_value=20,
-            native_step=5,
+            area_mapping.obstacle_height.to_raw,
+            native_min_value=area_mapping.obstacle_height.native_min_value,
+            native_max_value=area_mapping.obstacle_height.native_max_value,
+            native_step=area_mapping.obstacle_height.native_step,
             native_unit_of_measurement=UnitOfLength.CENTIMETERS,
             icon="mdi:format-vertical-align-top",
         ),
@@ -276,13 +333,13 @@ def area_sensor_descriptions(
             "cut_direction",
             "Cutting direction",
             "angle",
-            lambda area: area_mapping.cut_angle(area.angle)
+            lambda area: area_mapping.cut_angle.to_native(area.angle)
             if area.angle is not None
             else None,
-            area_mapping.cut_angle_to_raw,
-            native_min_value=0,
-            native_max_value=359,
-            native_step=1,
+            area_mapping.cut_angle.to_raw,
+            native_min_value=area_mapping.cut_angle.native_min_value,
+            native_max_value=area_mapping.cut_angle.native_max_value,
+            native_step=area_mapping.cut_angle.native_step,
             native_unit_of_measurement=DEGREE,
             icon="mdi:angle-acute",
         ),
