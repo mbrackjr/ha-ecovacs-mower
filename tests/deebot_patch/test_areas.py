@@ -5,13 +5,15 @@ from unittest.mock import Mock, call
 from deebot_client.message import HandlingState
 
 from custom_components.ecovacs_mower.deebot_patch.areas import (
-    GetAreaParameter,
-    GetAreaSet,
     MowerArea,
     MowerAreaEvent,
-    SetAreaParameter,
     area_for,
     reset,
+)
+from custom_components.ecovacs_mower.deebot_patch.commands import (
+    GetAreaParameter,
+    GetAreaSet,
+    SetAreaParameter,
 )
 
 
