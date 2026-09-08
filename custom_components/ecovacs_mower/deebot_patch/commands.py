@@ -35,10 +35,7 @@ setting is writable, so it needs both halves (issue #54).
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any
-
-import orjson
 
 from deebot_client.command import Command
 from deebot_client.commands.json.charge_state import GetChargeState
@@ -349,16 +346,25 @@ class CleanMower(_AdaptiveFamily, Clean):
     """
 
     def __init__(self, action: CleanAction) -> None:
-        """Build both delegates once; the action is selected per execution."""
-        super().__init__()
+        """Build both delegates for *action*."""
         self._action = action
-        self._delegates = {
-            Family.NON_V2: _CleanNonV2(),
-            Family.V2: _CleanV2Mower(),
-        }
+        self._delegates: dict[Family, Command] = {}
+        super().__init__(action)
 
     def _get_args(self, action: CleanAction) -> dict[str, Any]:
-        return {"act": action.value, "content": {"type": CleanMode.AUTO.value}}
+        # Inert as a payload. Clean.__init__ calls this and stores the result
+        # in _args, but nothing sends it: each delegate builds its own payload
+        # from its own library base. Not empty, though: Command.__eq__
+        # compares NAME and _args, and an empty dict here would make every
+        # CleanMower(...) instance equal regardless of action, so
+        # mock.assert_called_with(CleanMower(CleanAction.PAUSE)) would pass
+        # for a call actually made with CleanAction.START. Keying on the
+        # action keeps equality — and the wrapper's repr() — meaningful
+        # without this ever being a shape a delegate would recognise.
+        return {"act": action.value}
+
+    def _delegate(self, family: Family) -> Command:
+        return self._delegates[family]
 
     async def _execute(
         self,
@@ -366,38 +372,47 @@ class CleanMower(_AdaptiveFamily, Clean):
         device_info: ApiDeviceInfo,
         event_bus: EventBus,
     ) -> tuple[HandlingResult, dict[str, Any]]:
-        action = self._action
-        if action is CleanAction.START:
-            record = record_for(event_bus)
-            if record is not None and record.state is State.PAUSED:
-                action = CleanAction.RESUME
-        return await self._execute_action(
-            action, authenticator, device_info, event_bus
-        )
+        """Decide the action, then send it on the family that answers."""
+        action = self._effective_action(event_bus)
+        self._delegates = {
+            Family.NON_V2: _CleanNonV2(action),
+            Family.V2: _CleanV2Mower(action),
+        }
+        return await super()._execute(authenticator, device_info, event_bus)
 
-    async def _execute_action(
-        self,
-        action: CleanAction,
-        authenticator: Authenticator,
-        device_info: ApiDeviceInfo,
-        event_bus: EventBus,
-    ) -> tuple[HandlingResult, dict[str, Any]]:
-        """Execute a selected action on the adaptive family."""
-        original_action = self._action
-        self._action = action
-        try:
-            return await _AdaptiveFamily._execute(
-                self, authenticator, device_info, event_bus
-            )
-        finally:
-            self._action = original_action
+    def _effective_action(self, event_bus: EventBus) -> CleanAction:
+        """``START`` or ``RESUME``, from the state the mower is really in.
 
-    def _delegate(self, family: Family) -> Command:
-        """Return the delegate for the selected family and action."""
-        delegate = self._delegates[family]
-        if isinstance(delegate, _CleanNonV2):
-            delegate._get_args = lambda _action: self._get_args(action)  # type: ignore[method-assign]
-        return delegate
+        A pause the gate suppressed still has to reach this decision: the
+        entity reads docked, but the plan is paused and the mower wants
+        ``resume``. Nothing else reads ``record.suppressed``.
+        """
+        if self._action not in (CleanAction.START, CleanAction.RESUME):
+            return self._action
+
+        state = None
+        if (record := record_for(event_bus)) is not None:
+            state = record.suppressed
+        if state is None and (last := event_bus.get_last_event(StateEvent)):
+            state = last.state
+
+        if state is State.PAUSED:
+            return CleanAction.RESUME
+        return CleanAction.START
+
+
+class _GetCleanInfoNonV2(_MowerCleanInfoHandling, GetCleanInfo):
+    """``getCleanInfo``: what every confirmed firmware answers."""
+
+
+class _GetCleanInfoV2(_MowerCleanInfoHandling, GetCleanInfoV2):
+    """``getCleanInfo_V2``: what firmware 1.36.208 answers instead.
+
+    The mixin is what matters here. Delegating to the library's
+    ``GetCleanInfoV2`` unchanged would give this path neither the idle drop nor
+    the charge gate, because a command's handler notifies the event bus from
+    inside ``handle()`` and a wrapper never sees the value.
+    """
 
 
 class GetCleanInfoMower(_AdaptiveFamily, GetCleanInfo):
@@ -558,8 +573,9 @@ class GetAreaParameter(CustomCommand):
                 continue
             area_id = str(parameter["areaID"])
             current = areas.get(area_id, MowerArea(area_id))
-            areas[area_id] = replace(
-                current,
+            areas[area_id] = current.__class__(
+                area_id=current.area_id,
+                name=current.name,
                 mow_height_level=_as_int(parameter.get("mowHeightLevel")),
                 cut_mode=_as_int(parameter.get("cutMode")),
                 obstacle_height=_as_int(parameter.get("obstacleHeight")),
@@ -630,8 +646,8 @@ class GetAreaSet(CustomCommand):
             return HandlingResult.success()
 
         try:
-            decoded = orjson.loads(blob)
-        except orjson.JSONDecodeError:
+            decoded = __import__("orjson").loads(blob)
+        except __import__("orjson").JSONDecodeError:
             _LOGGER.debug("Could not decode getAreaSet payload")
             return HandlingResult.analyse()
 
@@ -650,7 +666,14 @@ class GetAreaSet(CustomCommand):
             name = row[2] if len(row) >= 3 else None
             if isinstance(name, str) and name.strip():
                 current = areas.get(area_id, MowerArea(area_id))
-                areas[area_id] = replace(current, name=name.strip())
+                areas[area_id] = current.__class__(
+                    area_id=current.area_id,
+                    name=name.strip(),
+                    mow_height_level=current.mow_height_level,
+                    cut_mode=current.cut_mode,
+                    obstacle_height=current.obstacle_height,
+                    angle=current.angle,
+                )
             elif area_id not in areas:
                 areas[area_id] = MowerArea(area_id)
 
@@ -735,20 +758,46 @@ class GetRainDelay(JsonCommandWithMessageHandling, OnRainDelay):
     ``onRainDelay`` is sent when somebody changes the setting and never
     otherwise, so without this the switch and the number would read "unknown"
     from startup until the owner next opened the app and touched the rain
-    setting (issue #54).
+    sensor (issue #31 is the identical failure on the protection flags).
+
+    ``OnRainDelay`` is inherited for its handler: the answer carries the same
+    payload as the push, so both entry points must parse it the same way. Only
+    ``NAME`` differs, which is also why the pair cannot be one class — the
+    message registry and the command topic are keyed on that one string.
+
+    Evidence that the command exists on the wire, since the library has no
+    definition to copy: ``Janverhu/ecovacs-goat-g1`` requests ``getRainDelay``
+    in its startup group against a GOAT G1 and parses the answer as an
+    ``onRainDelay`` payload. It takes no arguments.
     """
 
     NAME = "getRainDelay"
 
 
-class SetRainDelay(CustomCommand):
-    """Set both halves of the mower's rain sensor setting."""
+class SetRainDelay(ExecuteCommand):
+    """Write the rain sensor's setting and its post-rain hold.
+
+    The device wants the pair, not a field at a time: the same integration that
+    establishes ``getRainDelay`` reads the other half out of its own state
+    before every write, for both the toggle and the duration. That is why the
+    switch and the number entities each hold the whole last event and send the
+    field they do not own unchanged.
+
+    ``ExecuteCommand`` rather than the library's ``JsonSetCommand``: that base
+    exists to link a set to its get so an answer can update the sensors, and it
+    drags ``CommandMqttP2P`` along with it. Neither buys anything here — the
+    device pushes ``onRainDelay`` on every change, including its own answer to
+    this command, which is how the entities learn the new value. What
+    ``ExecuteCommand`` does give is the part that matters: a non-zero ``code``
+    in the reply is reported as a failure instead of passing for success.
+    """
 
     NAME = "setRainDelay"
 
     def __init__(self, *, enable: bool, delay: int) -> None:
-        """Build a complete rain-delay request."""
-        super().__init__(self.NAME, {"enable": int(enable), "delay": delay})
+        # 0/1, not JSON booleans: that is what the app sends and what every
+        # observed payload of this message carries.
+        super().__init__({"enable": 1 if enable else 0, "delay": delay})
 
 
 class GetStatsMower(GetStats):
