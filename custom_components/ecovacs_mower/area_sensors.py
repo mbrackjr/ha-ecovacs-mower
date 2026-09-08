@@ -36,9 +36,9 @@ from . import EcovacsMowerConfigEntry
 from .deebot_patch.areas import (
     MowerArea,
     MowerAreaEvent,
-    SetAreaParameter,
     area_for,
 )
+from .deebot_patch.commands import SetAreaParameter
 from .deebot_patch.hardware import profile_for_class
 from .entity import EcovacsDescriptionEntity
 
