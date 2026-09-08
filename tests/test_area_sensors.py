@@ -111,6 +111,17 @@ def test_area_parameter_lookup_round_trips_and_derives_raw_range() -> None:
     assert mapping.mow_height.to_raw(10) is None
 
 
+def test_area_parameter_lookup_accepts_adjacent_pairs() -> None:
+    """A multi-value lookup validates adjacent pairs without strict zip errors."""
+    from custom_components.ecovacs_mower.area_sensors import AreaParameterLookup
+
+    lookup = AreaParameterLookup(values=(9, 8, 7, 6, 5, 4, 3))
+
+    assert lookup.native_min_value == 3.0
+    assert lookup.native_max_value == 9.0
+    assert lookup.native_step == 1.0
+
+
 def test_a1600_mow_height_calibration() -> None:
     """A1600 mow-height levels map to the observed centimetre values."""
     description = _descriptions()[0]
