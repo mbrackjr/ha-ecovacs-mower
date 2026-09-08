@@ -64,7 +64,7 @@ class AreaParameterLookup:
             return
         steps = {
             round(float(b) - float(a), 10)
-            for a, b in zip(self.values, self.values[1:], strict=True)
+            for a, b in zip(self.values, self.values[1:])
         }
         if len(steps) != 1 or not steps or next(iter(steps)) == 0:
             raise ValueError("Area parameter lookup values must have one non-zero step")
@@ -420,108 +420,57 @@ class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
         raw_value = self.entity_description.to_raw_fn(value)
         if raw_value is None:
             raise HomeAssistantError(
-                f"{self.entity_description.parameter_name} value {value} "
-                "cannot be represented by this mower"
+                f"Unsupported {self.entity_description.parameter_name} value: {value}"
             )
 
-        area = area_for(self._device.events, self._area_id)
+        area = area_for(self._area_id)
         if area is None:
-            raise HomeAssistantError(
-                f"Area {self._area_id} has not reported its parameters yet"
-            )
+            raise HomeAssistantError(f"Unknown mower area: {self._area_id}")
 
         command = build_set_area_parameter(
-            area, self.entity_description.raw_field, raw_value
+            area,
+            self.entity_description.raw_field,
+            raw_value,
         )
         if command is None:
             raise HomeAssistantError(
-                f"Area {self._area_id} has incomplete parameters; wait for "
-                "the mower to report all area settings"
+                f"Cannot set {self.entity_description.parameter_name}: "
+                "mower area state is incomplete"
             )
 
-        await self._execute_command(command)
-        self._device.events.request_refresh(MowerAreaEvent)
+        await self._device.execute(command)
 
 
-async def async_setup_area_sensors(
-    config_entry: EcovacsMowerConfigEntry,
+def _area_mapping_for(device: Device):
+    """Return the writable area mapping for a device, if supported."""
+    profile = profile_for_class(device.device_info["class"])
+    if profile is None or not profile.area_parameters:
+        return None
+    return profile.area_mapping
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: EcovacsMowerConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
-    *,
-    number_platform: bool = False,
 ) -> None:
-    """Add dynamic area number entities from the HA number platform.
-
-    The function name is retained because this dynamic entity module was
-    introduced while the area values were read-only sensors. The sensor
-    platform still imports it during the transition, but writable area entities
-    must only be registered by the number platform.
-    """
-    if not number_platform:
-        return
-
-    controller = config_entry.runtime_data
+    """Set up dynamic area number entities for supported mower models."""
+    controller = entry.runtime_data
     for device in controller.devices:
-        if device.capabilities.device_type is not DeviceType.MOWER:
+        mapping = _area_mapping_for(device)
+        if mapping is None:
             continue
-        profile = profile_for_class(device.device_info["class"])
-        if profile is None or not profile.area_parameters:
-            continue
-        area_mapping = AREA_PARAMETER_MAPPINGS.get(profile.device_class)
-        if area_mapping is None:
-            continue
-        _setup_device_area_sensors(
-            device, config_entry, async_add_entities, area_mapping
-        )
-
-
-def _setup_device_area_sensors(
-    device: Device,
-    config_entry: EcovacsMowerConfigEntry,
-    async_add_entities: AddConfigEntryEntitiesCallback,
-    area_mapping: AreaParameterMapping,
-) -> None:
-    """Project the patch-owned area state into dynamic HA entities."""
-    entities: dict[str, list[EcovacsAreaNumber]] = {}
-
-    def add_area(area: MowerArea) -> None:
-        """Create the four entities for a newly discovered area."""
-        if area.area_id in entities:
-            return
-        name = area.name or f"Area {area.area_id}"
-        area_entities = [
-            EcovacsAreaNumber(device, area.area_id, description, name)
-            for description in area_sensor_descriptions(
-                area.area_id, area_mapping=area_mapping
+        areas = area_for(device.device_info["class"])
+        for area in areas:
+            async_add_entities(
+                EcovacsAreaNumber(
+                    device,
+                    area.area_id,
+                    description,
+                    area.name or f"Area {area.area_id}",
+                )
+                for description in area_sensor_descriptions(
+                    area.area_id,
+                    area_mapping=mapping,
+                )
             )
-        ]
-        entities[area.area_id] = area_entities
-        async_add_entities(area_entities)
-        for entity in area_entities:
-            entity._attr_native_value = entity.entity_description.value_fn(area)
-
-    async def on_area_state(event: MowerAreaEvent) -> None:
-        """Create missing entities and project the new authoritative state."""
-        reported_ids = {area.area_id for area in event.areas}
-        for area in event.areas:
-            if area.area_id not in entities:
-                add_area(area)
-            else:
-                for entity in entities[area.area_id]:
-                    entity._attr_native_value = entity.entity_description.value_fn(area)
-                    if area.name:
-                        entity.set_area_name(area.name)
-                    entity.async_write_ha_state()
-
-        # An area removed from the mower becomes unavailable rather than being
-        # silently deleted from HA. Numeric IDs remain stable, and entity
-        # removal is intentionally a user-visible lifecycle action.
-        for area_id, area_entities in entities.items():
-            if area_id not in reported_ids:
-                for entity in area_entities:
-                    entity._attr_native_value = None
-                    entity.async_write_ha_state()
-
-    config_entry.async_on_unload(
-        device.events.subscribe(MowerAreaEvent, on_area_state)
-    )
-    device.events.request_refresh(MowerAreaEvent)
