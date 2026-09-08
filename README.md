@@ -171,10 +171,10 @@ area on the A1600 LiDAR Pro:
 | Platform | Count | What |
 |---|---|---|
 | `lawn_mower` | 1 | Real state (`mowing`, `paused`, `returning`, `docked`, `error`) that updates within seconds, plus working `start_mowing`, `pause`, and `dock` |
-| `sensor` | 16 + one per beacon + four per A1600 LiDAR Pro area | Activity (the mower's state with the reason folded in — `returning_rain`, `docked_rain_delay`; see below), battery, error code (disabled by default — see below), mowing progress (see below), job target area, job target duration, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name, and on a beacon-guided mower one battery percentage per UWB beacon (see below). On an A1600 LiDAR Pro, four additional sensors per configured area report mowing height, cutting speed, obstacle height and cutting direction (see below) |
+| `sensor` | 16 + one per beacon | Activity (the mower's state with the reason folded in — `returning_rain`, `docked_rain_delay`; see below), battery, error code (disabled by default — see below), mowing progress (see below), job target area, job target duration, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name, and on a beacon-guided mower one battery percentage per UWB beacon (see below). |
 | `binary_sensor` | 6 | Fault — a latched problem that stays on until the mower recovers or you clear it (see below) — plus rain sensor, rain delay, emergency stop, locked, animal protection: the mower's raw protection flags, from the `onProtectState` message the library drops (see below) |
 | `switch` | 8 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection, rain detection (see below) |
-| `number` | 3 | Notification volume, cutting direction, rain delay duration (see below) |
+| `number` | 3 + four per A1600 LiDAR Pro area | Notification volume, cutting direction, rain delay duration (see below), plus four writable area-parameter views per configured A1600 LiDAR Pro area (see below) |
 | `button` | 6 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), and "Clear fault" (releases the latched fault; see below) |
 | `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped — see below) |
 | `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, and `onMapTrace` on firmware 1.17); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
@@ -186,16 +186,22 @@ committed date.
 ### Area parameters
 
 On the **Ecovacs GOAT A1600 LiDAR Pro** (`e4gqia`), each configured mower
-area exposes four read-only sensors: mowing height, cutting speed, obstacle
-height and cutting direction. The sensors use the mower's numeric `areaID`
-for their identity and convert the mower's raw parameter levels to
+area exposes four writable number entities: mowing height, mowing speed,
+obstacle height and cutting direction. The entities use the mower's numeric
+`areaID` for their identity and convert the mower's raw parameter levels to
 Home Assistant values.
+
+Writes are converted back to raw protocol values and sent as one complete
+`setAreaParameter` command. Each write merges the changed raw value with the
+other three raw values from the authoritative area snapshot; if the mower has
+not yet reported a complete snapshot, the write is refused rather than
+inventing defaults. State is not updated optimistically: the mower must report
+the resulting raw values through the normal area refresh.
 
 This capability is intentionally restricted to `e4gqia`. The raw values and
 their meanings have been validated on that model only; matching field names
 on another GOAT model are not evidence that the semantics are the same.
 Other device classes will be enabled only after independent validation.
-Per-area write support is not included yet.
 
 ### Area names
 
@@ -407,8 +413,8 @@ Two things worth knowing:
   minutes while a run is in progress, stopping when the mower parks. A run
   interrupted by charging needs no special case — the mower docks, the poll
   stops, and it starts again when the job resumes. The poll is also why the
-  final figure comes from elsewhere: its five-minute cadence rarely lands on the
-  last percent of a run, so the reading is completed from the job-finished
+  final figure comes from elsewhere: its five-minute cadence rarely lands on
+  the last percent of a run, so the reading is completed from the job-finished
   message the mower pushes at the same moment.
 
 `paused` is deliberately not a reason to stop asking: it is a normal mid-run
@@ -490,8 +496,8 @@ above. This is the one entity in this list someone is likely to go
 looking for by name, so it's worth repeating here rather than only in the
 table.
 
-For an alarm, though, **`binary_sensor.<device>_fault` is the one you
-want** — it is enabled by default and, unlike the error sensor, it does
+For an alarm, though, **`binary_sensor.<device>_fault` is the one
+you want** — it is enabled by default and, unlike the error sensor, it does
 not go back to "fine" on its own. See the next section.
 
 ### A fault that stays until something actually clears it
@@ -501,7 +507,7 @@ not go back to "fine" on its own. See the next section.
 ([#53](https://github.com/nord-/ha-ecovacs-mower/issues/53)): a blade-disc
 jam pushed `code:[406]` exactly once and was followed **89 milliseconds
 later** by `code:[0]` — and then by another 3076 zeros over the 38 minutes
-the mower sat stuck on the lawn draining its battery. The error sensor read
+ the mower sat stuck on the lawn draining its battery. The error sensor read
 `0` the whole time, and `lawn_mower` read `paused`, which is
 indistinguishable from a pause by hand. Nothing an automation could fire on
 existed for longer than a tenth of a second.
