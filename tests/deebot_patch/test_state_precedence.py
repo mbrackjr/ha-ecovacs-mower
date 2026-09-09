@@ -70,3 +70,72 @@ def _registry_size() -> dict[object, object]:
     from custom_components.ecovacs_mower.deebot_patch import state_precedence
 
     return dict(state_precedence._RECORDS)
+
+
+def test_a_new_record_knows_no_map() -> None:
+    assert MowerStateRecord().map_id is None
+
+
+def test_note_map_keeps_a_real_map_id_and_follows_a_change() -> None:
+    record = MowerStateRecord()
+    record.note_map("2049987783")
+    assert record.map_id == "2049987783"
+    # Last writer wins: a map switched in the app is the map the next border
+    # job should run on.
+    record.note_map("1")
+    assert record.map_id == "1"
+
+
+def test_note_map_ignores_everything_that_is_not_a_map() -> None:
+    # "0" is the library's own "no map" marker (OnCachedMapInfo) and what the
+    # onMapTrack envelopes of an idle mower carry; an empty string and a
+    # missing field say nothing either.
+    record = MowerStateRecord()
+    record.note_map("7")
+    for junk in (None, "", "0", 0, 12, ["1"]):
+        record.note_map(junk)
+    assert record.map_id == "7"
+
+
+def test_note_map_skips_a_map_the_mower_is_not_using() -> None:
+    # A getMapInfo_V2 answer can carry fragments for a stored map that is not
+    # the active one; last-writer-wins would then name the wrong map. The
+    # envelope says which is which with "using", so an explicit 0 is skipped.
+    record = MowerStateRecord()
+    record.note_map("7", using=1)
+    record.note_map("8", using=0)
+    assert record.map_id == "7"
+    record.note_map("9", using="0")
+    assert record.map_id == "7"
+
+
+def test_note_map_accepts_an_envelope_without_using() -> None:
+    # onMapTrack and onMapTrace never carry the field; absence is not "not
+    # using", it is "the message does not say", and the id is still good.
+    record = MowerStateRecord()
+    record.note_map("7", using=None)
+    assert record.map_id == "7"
+    record.note_map("8")
+    assert record.map_id == "8"
+
+
+def test_moving_does_not_forget_the_map() -> None:
+    # Leaving the dock does not change the map, unlike the suppressed state.
+    record = MowerStateRecord()
+    record.note_map("7")
+    record.dock()
+    record.move()
+    assert record.map_id == "7"
+
+
+def test_map_id_for_reads_the_record_and_is_none_for_strangers() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
+        map_id_for,
+    )
+
+    bus = _bus()
+    assert map_id_for(bus) is None  # unregistered: an ordinary vacuum
+    register(bus)
+    assert map_id_for(bus) is None  # registered, nothing reported yet
+    record_for(bus).note_map("7")
+    assert map_id_for(bus) == "7"
