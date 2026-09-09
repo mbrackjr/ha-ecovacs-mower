@@ -31,6 +31,8 @@ from custom_components.ecovacs_mower.deebot_patch.messages import (
     OnChargeInfo,
     OnChargeState,
     OnCleanInfo,
+    OnMowAutoStart,
+    OnMowAutoStop,
     OnMowBorderStart,
     OnMowBorderStop,
     OnMowScheduleStart,
@@ -1106,6 +1108,63 @@ def test_the_border_job_edge_names_are_registered() -> None:
 
     assert MESSAGES["onFwBuryPoint-bd_task-mow-border-start"] is OnMowBorderStart
     assert MESSAGES["onFwBuryPoint-bd_task-mow-border-stop"] is OnMowBorderStop
+
+
+# auto-* from a GOAT G1-800 (77atlz, fw 1.36.208) on 2026-09-04, issue #74: a
+# job started from Home Assistant. The library's ``Clean`` sends
+# ``type: "auto"`` on a start, so this is the one job type the integration
+# itself starts — and it was the one without a handler. The stop speaks the
+# border dialect (``triggerType``, ``cuttedArea``) and adds ``pauseId``/
+# ``resumeId`` for the pause and resume the job went through. The report
+# listed the fields and quoted the areas; the ids are placeholders of the
+# observed shape.
+_AUTO_STOP = {
+    "bid": "1011788091708000",
+    "index": "0000001204",
+    "mowId": "1788089834000000",
+    "pauseId": "1788091081000000",
+    "resumeId": "1788091088000000",
+    "sid": "2021788091708000",
+    "triggerType": "app",
+    "ts": "1788091708000",
+    "cuttedArea": 48.865,
+    "workArea": 137.675,
+}
+# The start was not quoted in the report. Modelled on the border start from
+# the same firmware, which is the other job type it announces in this dialect.
+_AUTO_START = {
+    "index": "0000001187",
+    "mapid": "2049987783",
+    "mowId": "1788089834000000",
+    "triggerType": "app",
+    "ts": "1788089834000",
+}
+
+
+def test_an_auto_stop_from_home_assistant_publishes_both_areas() -> None:
+    """A job the integration started ends on ``mow-auto-stop`` (issue #74)."""
+    (event,) = _notified_edges(OnMowAutoStop, _AUTO_STOP)
+
+    assert event.phase == "stop"
+    assert event.trigger == "app"
+    assert event.mowed_area == 48.865
+    assert event.work_area == 137.675
+
+
+def test_an_auto_start_is_a_start() -> None:
+    (event,) = _notified_edges(OnMowAutoStart, _AUTO_START)
+
+    assert event.phase == "start"
+    assert event.trigger == "app"
+    assert event.mowed_area is None
+    assert event.work_area is None
+
+
+def test_the_auto_job_edge_names_are_registered() -> None:
+    apply()
+
+    assert MESSAGES["onFwBuryPoint-bd_task-mow-auto-start"] is OnMowAutoStart
+    assert MESSAGES["onFwBuryPoint-bd_task-mow-auto-stop"] is OnMowAutoStop
 
 
 async def test_two_identical_starts_both_reach_the_subscriber() -> None:
