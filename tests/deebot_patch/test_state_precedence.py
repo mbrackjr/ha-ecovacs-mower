@@ -1,4 +1,4 @@
-"""Tests for the per-device state record (issue #67)."""
+"""Tests for the per-device state record (issues #67 and #12)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from deebot_client.models import State
 
 from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
     MowerStateRecord,
+    map_id_for,
     record_for,
     register,
 )
@@ -129,10 +130,6 @@ def test_moving_does_not_forget_the_map() -> None:
 
 
 def test_map_id_for_reads_the_record_and_is_none_for_strangers() -> None:
-    from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
-        map_id_for,
-    )
-
     bus = _bus()
     assert map_id_for(bus) is None  # unregistered: an ordinary vacuum
     register(bus)

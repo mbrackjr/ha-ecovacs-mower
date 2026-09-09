@@ -374,7 +374,8 @@ class EcovacsController:
         """Start asking for the mower's state and stats, unless already doing so.
 
         Public: lawn_mower.py calls this directly from its start-mowing and
-        mow-area commands. A command sent from HA never produces a
+        mow-area commands, and button.py from the mow-border button. A command
+        sent from HA never produces a
         StateEvent by itself — only a confirmed push does — so nothing else
         would restart the tick if that push never lands.
         """

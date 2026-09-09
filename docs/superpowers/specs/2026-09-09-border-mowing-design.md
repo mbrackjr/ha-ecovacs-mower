@@ -37,7 +37,7 @@ The one thing the request needs that the integration does not have is the **`mid
 
 The coverage freeze a border job used to cause (issue #52) is fixed by PR #83, which is on `master`. Nothing gates this work any more.
 
-For ending a task, the reporter on issue #51 captured the app's *Beenden* on the same G1-800, on a running job:
+For ending a task, the same G1-800 owner captured the app's *Beenden* in a comment on issue #51, on a running job (the issue itself was opened by an O800 RTK owner, whose mower answers on the non-V2 family):
 
 ```
 q clean_V2  {"act":"stop","content":{"type":""},"bdTaskID":"<id>"}
