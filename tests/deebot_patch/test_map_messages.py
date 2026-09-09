@@ -332,3 +332,86 @@ def test_on_map_trace_notifies_an_emptied_blob() -> None:
     assert isinstance(events[0], MowerCoveredAreaEvent)
     assert events[0].areas == []
     assert events[0].holes == []
+
+
+def test_the_first_fragment_of_a_map_message_teaches_the_map_id() -> None:
+    # Written by the handler, not learned from an event: the bus drops repeated
+    # events before subscribers run, and the id has to be known before the
+    # blob is even complete — a border job cannot wait for a full outline.
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
+        map_id_for,
+        register,
+    )
+
+    event_bus = Mock()
+    register(event_bus)
+    fragments = sorted(
+        FIXTURES["on_map_info_v2_g1800"],
+        key=lambda i: int(i["payload"]["body"]["data"]["index"]),
+    )
+    OnMapInfo.handle(event_bus, deepcopy(fragments[0]["payload"]))
+
+    assert map_id_for(event_bus) == "123456789"
+
+
+def test_a_map_id_of_zero_teaches_nothing() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
+        map_id_for,
+        register,
+    )
+
+    event_bus = Mock()
+    register(event_bus)
+    for item in FIXTURES["on_map_track_multipart"]:
+        OnMapTrack.handle(event_bus, deepcopy(item["payload"]))
+
+    assert map_id_for(event_bus) is None
+
+
+def test_a_fragment_for_a_map_not_in_use_teaches_nothing() -> None:
+    # The envelope's own "using" flag, passed through to the record: a stored
+    # but inactive map in a getMapInfo_V2 answer must not become the border
+    # job's target. Constructed, not captured — no fixture has using 0.
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
+        map_id_for,
+        register,
+    )
+
+    event_bus = Mock()
+    register(event_bus)
+    fragment = deepcopy(FIXTURES["on_map_info_v2_g1800"][0]["payload"])
+    fragment["body"]["data"]["mid"] = "987654321"
+    fragment["body"]["data"]["using"] = 0
+    OnMapInfo.handle(event_bus, fragment)
+
+    assert map_id_for(event_bus) is None
+
+
+def test_an_undecodable_blob_still_teaches_the_map_id() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
+        map_id_for,
+        register,
+    )
+
+    event_bus = Mock()
+    register(event_bus)
+    payload = deepcopy(FIXTURES["on_mi_full"][0]["payload"])
+    payload["body"]["data"]["info"] = "not base64 at all!!"
+    OnMI.handle(event_bus, payload)  # must not raise
+
+    assert map_id_for(event_bus) == "1"
+
+
+def test_an_unregistered_bus_records_no_map_id() -> None:
+    # A Deebot vacuum on the same account reaches these handlers too; it must
+    # not get a record made for it as a side effect.
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
+        map_id_for,
+        record_for,
+    )
+
+    event_bus = Mock()
+    OnMI.handle(event_bus, deepcopy(FIXTURES["on_mi_full"][0]["payload"]))
+
+    assert record_for(event_bus) is None
+    assert map_id_for(event_bus) is None
