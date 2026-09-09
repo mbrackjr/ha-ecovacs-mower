@@ -233,3 +233,82 @@ async def test_the_dump_itself_redacts_and_not_only_the_set() -> None:
     # Country and device class are what someone triaging reads first.
     assert config["country"] == "IT"
     assert reported["class"] == "77atlz"
+
+
+async def _dump_with_a_latched_fault() -> dict:
+    """A two-mower dump: one holding fault 406, one with no latch at all.
+
+    The faulted mower's latch is a real ``FaultLatch`` on a real bus, driven the
+    way the controller drives it, so the dump reads what the latch actually
+    holds rather than what a stub says it holds. The other mower has no entry in
+    ``fault_latches`` — the shape for a device the controller never latched.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, Mock
+
+    from deebot_client.event_bus import EventBus
+    from deebot_client.events import ErrorEvent
+
+    from custom_components.ecovacs_mower.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+    from custom_components.ecovacs_mower.fault import FaultLatch
+
+    faulted = MagicMock()
+    faulted.device_info = {"did": "faulted-did", "class": "77atlz"}
+    faulted.events = EventBus(
+        AsyncMock(), Mock(get_refresh_commands=lambda _event: [])
+    )
+    latch = FaultLatch(faulted)
+    latch.subscribe()
+    faulted.events.notify(
+        ErrorEvent(406, "Blade-disc blocked! Blade-disc cannot rotate.")
+    )
+    for _ in range(4):
+        await asyncio.sleep(0)
+
+    healthy = MagicMock()
+    healthy.device_info = {"did": "healthy-did", "class": "77atlz"}
+
+    entry = MagicMock()
+    entry.data = {"country": "IT"}
+    entry.runtime_data.devices = [faulted, healthy]
+    entry.runtime_data.fault_latches = {"faulted-did": latch}
+
+    return await async_get_config_entry_diagnostics(None, entry)
+
+
+async def test_the_dump_carries_the_latched_fault_with_its_device() -> None:
+    """Issue #65: the latch is per-device state the dump could not show.
+
+    The code and its description ride along in the device's own entry. Both
+    are safe to publish as they are — the code is a number from the device and
+    the text is a fixed English string from ``errors.py`` or deebot-client.
+    """
+    faulted, healthy = (await _dump_with_a_latched_fault())["devices"]
+
+    assert faulted["fault_code"] == 406
+    assert (
+        faulted["fault_description"]
+        == "Blade-disc blocked! Blade-disc cannot rotate."
+    )
+    assert healthy["fault_code"] is None
+    assert healthy["fault_description"] is None
+
+
+async def test_no_did_reaches_the_dump_in_key_position() -> None:
+    """The trap issue #65 names, pinned for every future section.
+
+    ``controller.fault_latches`` is keyed by ``did``, and so are ``maps`` and
+    the map stores. ``async_redact_data`` replaces the *value* under a redacted
+    key and never looks at keys themselves, so publishing any of those dicts
+    as-is would put the identifier exactly where redaction does not reach.
+    Serialising the whole dump and searching it covers keys, values and every
+    level of nesting in one assertion.
+    """
+    import json
+
+    dump = await _dump_with_a_latched_fault()
+
+    assert "faulted-did" not in json.dumps(dump)
+    assert "healthy-did" not in json.dumps(dump)

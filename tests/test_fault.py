@@ -235,3 +235,21 @@ async def test_a_latched_fault_survives_a_docked_paused_flap() -> None:
     await _push_state(bus, State.DOCKED)
 
     assert latch.code == _BLOCKED
+
+
+async def test_the_latch_keeps_the_description_alongside_the_code() -> None:
+    """The diagnostics dump reports the fault as code plus text (issue #65).
+
+    The text is settled at latch time — the library's wording when it has one,
+    ours otherwise — and published once. Recomputing it later would go through
+    ``error_description`` again, which warns for an unknown code, and would lose
+    the library's text. So the latch holds it, and releases it with the code.
+    """
+    latch, _ = _latch()
+    assert latch.description is None
+
+    await _push_error(latch._device.events, _BLOCKED)
+    assert latch.description == _BLOCKED_TEXT
+
+    await _push_state(latch._device.events, State.DOCKED)
+    assert latch.description is None
