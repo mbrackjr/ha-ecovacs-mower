@@ -1116,8 +1116,10 @@ def test_the_border_job_edge_names_are_registered() -> None:
 # itself starts — and it was the one without a handler. The stop speaks the
 # border dialect (``triggerType``, ``cuttedArea``) and adds ``pauseId``/
 # ``resumeId`` for the pause and resume the job went through. The report
-# listed the fields and quoted the areas; the ids are placeholders of the
-# observed shape.
+# listed ``triggerType``, ``cuttedArea``, ``workArea`` and the id fields
+# (``mowId``/``pauseId``/``resumeId``/``bid``/``sid``) and quoted the areas;
+# the ids are placeholders of the observed shape. ``index`` and ``ts`` were
+# not in the report — they are carried over from ``_BORDER_STOP``.
 _AUTO_STOP = {
     "bid": "1011788091708000",
     "index": "0000001204",
