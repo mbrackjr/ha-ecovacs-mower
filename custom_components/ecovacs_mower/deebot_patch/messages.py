@@ -27,14 +27,16 @@ parses the answer to ``getStats``, and ``OnStatsMower`` below parses the
 ``onStats`` push that some classes send and others never do (issue #55).
 
 ``MowerJobEdgeEvent`` republishes the task bury points that mark a job's own
-boundaries — ``onFwBuryPoint-bd_task-mow-{schedule,spotarea,border}-{start,stop}``,
-six more messages the library has no handler for. They are the only thing on
-the wire that separates a job which has finished from one parked to charge,
-which ``State`` reports identically (issue #73), and a completion carries the
-two areas its final percentage is computed from. All three job types are
-registered because the middle topic segment is the type, not the trigger: a
-zone job started from the app ends on ``mow-spotarea-stop``, an edge cut on
-``mow-border-stop`` (issue #74).
+boundaries — ``onFwBuryPoint-bd_task-mow-<type>-{start,stop}`` for the four
+types ``auto``, ``schedule``, ``spotarea`` and ``border``, eight more messages
+the library has no handler for. They are the only thing on the wire that
+separates a job which has finished from one parked to charge, which ``State``
+reports identically (issue #73), and a completion carries the two areas its
+final percentage is computed from. All four job types are registered because
+the middle topic segment is the type, not the trigger: a zone job started from
+the app ends on ``mow-spotarea-stop``, an edge cut on ``mow-border-stop``, and
+a job started from Home Assistant on ``mow-auto-stop`` — ``auto`` is the type
+the library's own start command sends (issue #74).
 
 ``OnPos`` is different in kind from the rest of this module: ``onPos`` is not
 unhandled, it is handled wrongly. See the class for what and why.
@@ -120,16 +122,21 @@ class MowerJobEdgeEvent(Event):
     The mower publishes four task bury points per job type —
     ``mow-schedule-{start,pause,resume,stop}`` and the same set for
     ``mow-spotarea``; ``mow-border`` has been observed with ``start``/``stop``
-    only — and the middle segment is the *job type*, not the trigger: a zone
-    job started from the app ends on ``mow-spotarea-stop``. Only the two
-    edges this integration acts on are registered; adding a ``pause`` or
-    ``resume`` is one subclass each (issue #73).
+    only, and ``mow-auto`` with a ``stop`` so far, its ``start`` inferred
+    rather than observed — and the middle segment is the *job type*, not the
+    trigger: a zone job started from the app ends on ``mow-spotarea-stop``,
+    and a job started from Home Assistant on ``mow-auto-stop``, ``auto`` being
+    the type the library's start command sends. Only the two edges this
+    integration acts on are registered; adding a ``pause`` or ``resume`` is
+    one subclass each (issue #73).
 
-    The border points speak a different dialect of the same payload:
+    The border and auto points speak a different dialect of the same payload:
     ``triggerType`` where the others say ``trigger``, and ``cuttedArea`` on a
-    stop where the others say ``mowedArea`` (issue #74, captured on a G1-800
-    fw 1.36.208). The handler reads the original spellings first, so the
-    schedule and spot-area paths are untouched by the fallbacks.
+    stop where the others say ``mowedArea`` (issue #74). Both were captured on
+    the same G1-800 on fw 1.36.208, so the dialect may belong to that firmware
+    branch rather than to the job types; the fallbacks do not care which. The
+    handler reads the original spellings first, so the schedule and spot-area
+    paths are untouched by them.
 
     ``phase`` is ``"start"`` or ``"stop"``. ``trigger`` is the raw string, and
     what it means is the consumer's business — see ``MowerTriggerEvent`` for
@@ -239,6 +246,20 @@ class OnMowBorderStop(_OnMowJobEdge):
     """An edge-cut job ends, for whatever reason its trigger names."""
 
     NAME = "onFwBuryPoint-bd_task-mow-border-stop"
+    PHASE = "stop"
+
+
+class OnMowAutoStart(_OnMowJobEdge):
+    """An ``auto`` job begins — the type Home Assistant's start sends (issue #74)."""
+
+    NAME = "onFwBuryPoint-bd_task-mow-auto-start"
+    PHASE = "start"
+
+
+class OnMowAutoStop(_OnMowJobEdge):
+    """An ``auto`` job ends, for whatever reason its trigger names."""
+
+    NAME = "onFwBuryPoint-bd_task-mow-auto-stop"
     PHASE = "stop"
 
 
