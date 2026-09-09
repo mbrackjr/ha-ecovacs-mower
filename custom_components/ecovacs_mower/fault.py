@@ -93,11 +93,22 @@ class FaultLatch:
         """Initialize the latch, cleared."""
         self._device = device
         self._code: int | None = None
+        self._description: str | None = None
 
     @property
     def code(self) -> int | None:
         """The latched error code, or ``None`` when nothing is latched."""
         return self._code
+
+    @property
+    def description(self) -> str | None:
+        """The latched code's text, settled when it was latched.
+
+        Kept rather than recomputed: ``error_description`` warns for a code it
+        does not know, and the library's own wording only exists on the event
+        that carried it. The diagnostics dump reads this (issue #65).
+        """
+        return self._description
 
     def subscribe(self) -> None:
         """Start following the device's errors and states.
@@ -143,6 +154,7 @@ class FaultLatch:
             description or "no description",
         )
         self._code = code
+        self._description = description
         self._publish(description)
 
     def _clear(self, reason: str) -> None:
@@ -157,6 +169,7 @@ class FaultLatch:
             reason,
         )
         self._code = None
+        self._description = None
         self._publish(None)
 
     def _publish(self, description: str | None) -> None:

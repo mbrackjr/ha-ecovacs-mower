@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.const import CONF_DEVICE_ID, CONF_PASSWORD, CONF_USERNAME
@@ -10,6 +10,11 @@ from homeassistant.core import HomeAssistant
 
 from . import EcovacsMowerConfigEntry
 from .const import CONF_CREDENTIALS, CONF_OVERRIDE_MQTT_URL, CONF_OVERRIDE_REST_URL
+
+if TYPE_CHECKING:
+    from deebot_client.device import Device
+
+    from .controller import EcovacsController
 
 # CONF_OVERRIDE_MQTT_URL/CONF_OVERRIDE_REST_URL are redacted so that
 # self-hosted installations do not leak their internal broker or REST address in
@@ -81,7 +86,31 @@ async def async_get_config_entry_diagnostics(
     return {
         "config": async_redact_data(dict(entry.data), REDACT),
         "devices": [
-            async_redact_data(dict(device.device_info), REDACT)
+            async_redact_data(
+                dict(device.device_info) | _fault(controller, device),
+                REDACT,
+            )
             for device in controller.devices
         ],
+    }
+
+
+def _fault(controller: EcovacsController, device: Device) -> dict[str, Any]:
+    """The mower's latched fault, folded into its own device entry.
+
+    ``controller.fault_latches`` is keyed by ``did``, and so are ``maps`` and
+    the map stores. None of them may be published as they are:
+    ``async_redact_data`` replaces the *value* under a redacted key and never
+    looks at keys, so a dict keyed by ``did`` would put the identifier exactly
+    where redaction does not reach. Riding along in the device entry, the fault
+    goes through the same redaction as everything else about that device and
+    introduces no key of its own (issue #65).
+
+    Both values are safe as they are: the code is a number from the device, the
+    text a fixed English string from ``errors.py`` or deebot-client.
+    """
+    latch = controller.fault_latches.get(device.device_info["did"])
+    return {
+        "fault_code": latch.code if latch else None,
+        "fault_description": latch.description if latch else None,
     }
