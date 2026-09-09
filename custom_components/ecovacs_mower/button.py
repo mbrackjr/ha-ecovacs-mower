@@ -18,8 +18,19 @@ relative to core, which states ``EcovacsLifespanButtonEntityDescription`` —
 likely a copy-paste slip, since the class never uses the lifespan description.
 Harmless at runtime, but an incorrect type in a fork is harder to spot than in
 upstream.
+
+Added beyond core as well: the mower-command buttons, ``mow_border`` (issue
+#12) and ``end_task`` (issue #51). Neither is a library capability — one needs
+the device's recorded map id, the other sends a ``CleanAction`` HA's
+``lawn_mower`` platform has no feature for — so they are described by
+``EcovacsMowerCommandButtonEntityDescription``, whose ``command_fn`` builds
+the command from the device at press time. A third such button is one more
+entry in ``MOWER_COMMAND_DESCRIPTIONS``.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import override
 
@@ -29,16 +40,25 @@ from deebot_client.capabilities import (
     CapabilityLifeSpan,
     DeviceType,
 )
+from deebot_client.command import Command
 from deebot_client.device import Device
 from deebot_client.events import LifeSpan
+from deebot_client.models import CleanAction
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
 from .const import SUPPORTED_LIFESPANS
+from .controller import EcovacsController
+from .deebot_patch.border import MowBorder
+from .deebot_patch.commands import CleanMower
+from .deebot_patch.hardware import BORDER_CLASSES
+from .deebot_patch.map_messages import MowerMapInfoEvent
+from .deebot_patch.state_precedence import map_id_for
 from .entity import (
     EcovacsCapabilityEntityDescription,
     EcovacsDescriptionEntity,
@@ -90,6 +110,75 @@ LIFESPAN_ENTITY_DESCRIPTIONS = tuple(
 )
 
 
+def _border_command(device: Device) -> Command:
+    """The border start for *device*'s current map, or a clear refusal.
+
+    The id is learned from the map messages' envelopes (state_precedence), and
+    on the one class that has this button the mower answers getMapInfo_V2
+    within seconds of setup, so an unknown id is the rare case. Asking for
+    that refresh here makes the failure heal itself: the next press works.
+    """
+    map_id = map_id_for(device.events)
+    if map_id is None:
+        device.events.request_refresh(MowerMapInfoEvent)
+        raise HomeAssistantError(
+            "The mower has not reported its map yet; try again in a moment"
+        )
+    return MowBorder(map_id)
+
+
+@dataclass(kw_only=True, frozen=True)
+class EcovacsMowerCommandButtonEntityDescription(ButtonEntityDescription):
+    """A button that sends one command built from the device at press time."""
+
+    command_fn: Callable[[Device], Command]
+    # None means every mower. A tuple limits the button to classes on which
+    # the command's request shape is confirmed.
+    classes: tuple[str, ...] | None = None
+    # A command that takes the mower off its dock never produces a StateEvent
+    # on its own, so the controller's poll has to be nudged — the same nudge
+    # lawn_mower.py gives start_mowing and mow_area.
+    starts_job: bool = False
+
+
+MOWER_COMMAND_DESCRIPTIONS: tuple[EcovacsMowerCommandButtonEntityDescription, ...] = (
+    EcovacsMowerCommandButtonEntityDescription(
+        key="mow_border",
+        translation_key="mow_border",
+        command_fn=_border_command,
+        classes=BORDER_CLASSES,
+        starts_job=True,
+        # No entity_category, for the reason play_sound gives above: a
+        # control, not diagnostics or configuration.
+    ),
+    EcovacsMowerCommandButtonEntityDescription(
+        key="end_task",
+        translation_key="end_task",
+        command_fn=lambda device: CleanMower(CleanAction.STOP),
+        # Every supported mower. The V2 payload is the app's own, captured on
+        # issue #51; the non-V2 payload is the shape pause already uses on
+        # that hardware, and the reporter there owns the mower that has to
+        # confirm it.
+        classes=None,
+        starts_job=False,
+    ),
+)
+
+
+def _mower_command_entities(
+    controller: EcovacsController,
+) -> list[EcovacsMowerCommandButtonEntity]:
+    """One command button per mower per description whose class gate passes."""
+    return [
+        EcovacsMowerCommandButtonEntity(device, controller, description)
+        for device in controller.devices
+        if device.capabilities.device_type is DeviceType.MOWER
+        for description in MOWER_COMMAND_DESCRIPTIONS
+        if description.classes is None
+        or device.device_info["class"] in description.classes
+    ]
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: EcovacsMowerConfigEntry,
@@ -115,6 +204,7 @@ async def async_setup_entry(
         for device in controller.devices
         if device.capabilities.device_type is DeviceType.MOWER
     )
+    entities.extend(_mower_command_entities(controller))
     async_add_entities(entities)
 
 
@@ -183,3 +273,38 @@ class EcovacsClearFaultButtonEntity(
     async def async_press(self) -> None:
         """Press the button."""
         self._latch.clear_by_request()
+
+
+class EcovacsMowerCommandButtonEntity(
+    EcovacsEntity[Capabilities],
+    ButtonEntity,
+):
+    """A button whose command is built from the device when pressed.
+
+    Issues #12 and #51. ``entity_description`` is assigned before the base
+    ``__init__`` runs because ``EcovacsEntity.__init__`` reads its ``key`` for
+    the unique id — the same order ``EcovacsDescriptionEntity`` uses.
+    """
+
+    entity_description: EcovacsMowerCommandButtonEntityDescription
+
+    def __init__(
+        self,
+        device: Device,
+        controller: EcovacsController,
+        description: EcovacsMowerCommandButtonEntityDescription,
+    ) -> None:
+        """Initialize entity."""
+        self.entity_description = description
+        super().__init__(device, device.capabilities)
+        self._controller = controller
+
+    @override
+    async def async_press(self) -> None:
+        """Press the button."""
+        # Built first: a refusal (no map id yet) must not restart the poll
+        # for a job that is not going to start.
+        command = self.entity_description.command_fn(self._device)
+        if self.entity_description.starts_job:
+            self._controller.start_polling(self._device)
+        await self._execute_command(command)

@@ -30,6 +30,12 @@
       "clear_fault": {
         "default": "mdi:alert-circle-check-outline"
       },
+      "end_task": {
+        "default": "mdi:stop-circle-outline"
+      },
+      "mow_border": {
+        "default": "mdi:vector-square"
+      },
       "play_sound": {
         "default": "mdi:map-marker-radius"
       },
