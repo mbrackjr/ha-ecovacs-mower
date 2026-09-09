@@ -109,3 +109,20 @@ async def test_mow_area_falls_back_to_v2_and_commits_family() -> None:
 def test_mow_area_keeps_clean_contract() -> None:
     assert issubclass(MowArea, Clean)
     assert MowArea.NAME == "clean"
+
+
+def test_zone_delegates_are_built_on_the_shared_task_builder() -> None:
+    # The border command (issue #12) sends the same nested shape with another
+    # type string; one builder keeps the two from drifting apart.
+    from custom_components.ecovacs_mower.deebot_patch.commands import (
+        _NoActionRewrite,
+        _TaskClean,
+    )
+
+    assert issubclass(_ZoneCleanNonV2, _TaskClean)
+    assert issubclass(_ZoneCleanV2, _TaskClean)
+    # The builder must still bypass Clean._execute's start/resume rewrite: the
+    # bypass only works when _NoActionRewrite comes before Clean in the MRO.
+    for delegate, topic_base in ((_ZoneCleanNonV2, Clean), (_ZoneCleanV2, CleanV2)):
+        mro = delegate.__mro__
+        assert mro.index(_NoActionRewrite) < mro.index(topic_base)

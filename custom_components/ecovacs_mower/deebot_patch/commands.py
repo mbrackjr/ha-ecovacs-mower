@@ -303,6 +303,29 @@ class _NoActionRewrite:
         return await Command._execute(self, authenticator, device_info, event_bus)
 
 
+class _TaskClean(_NoActionRewrite):
+    """A ``start`` for one named task type, on whichever topic the subclass adds.
+
+    ``spotArea`` (issue #11) and ``border`` (issue #12) share the shape
+    ``{"act": "start", "content": {"type": <task>, "value": <argument>}}``
+    and differ only in the two strings. One builder keeps them identical the
+    day the firmware wants a third field, and keeps the action-rewrite bypass
+    in one place. Not sendable on its own: a concrete subclass mixes in
+    ``Clean`` or ``CleanV2`` to supply ``NAME`` and the topic.
+    """
+
+    def __init__(self, task: str, value: str) -> None:
+        self._task = task
+        self._value = value
+        super().__init__(CleanAction.START)
+
+    def _get_args(self, action: CleanAction) -> dict[str, Any]:
+        return {
+            "act": action.value,
+            "content": {"type": self._task, "value": self._value},
+        }
+
+
 class _CleanNonV2(_NoActionRewrite, Clean):
     """Mow on the ``clean`` topic with a V2 payload, as the app does."""
 

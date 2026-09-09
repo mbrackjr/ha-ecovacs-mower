@@ -18,7 +18,7 @@ from deebot_client.commands.json.clean import Clean, CleanV2
 from deebot_client.message import HandlingResult
 from deebot_client.models import CleanAction, CleanMode
 
-from .commands import _AdaptiveFamily, _NoActionRewrite
+from .commands import _AdaptiveFamily, _TaskClean
 from .families import Family
 
 if TYPE_CHECKING:
@@ -30,18 +30,11 @@ if TYPE_CHECKING:
 _TYPE_SPOT_AREA = "spotArea"
 
 
-class _ZoneClean(_NoActionRewrite):
-    """Shared spot-area payload and action-rewrite bypass."""
+class _ZoneClean(_TaskClean):
+    """The spot-area payload, before a topic is chosen."""
 
     def __init__(self, area: list[int | float]) -> None:
-        self._value = ",".join(str(value) for value in area)
-        super().__init__(CleanAction.START)
-
-    def _get_args(self, action: CleanAction) -> dict[str, Any]:
-        return {
-            "act": action.value,
-            "content": {"type": _TYPE_SPOT_AREA, "value": self._value},
-        }
+        super().__init__(_TYPE_SPOT_AREA, ",".join(str(value) for value in area))
 
 
 class _ZoneCleanNonV2(_ZoneClean, Clean):
