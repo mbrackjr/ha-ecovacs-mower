@@ -121,8 +121,9 @@ class MowerJobEdgeEvent(Event):
 
     The mower publishes four task bury points per job type —
     ``mow-schedule-{start,pause,resume,stop}`` and the same set for
-    ``mow-spotarea``; ``mow-border`` and ``mow-auto`` have been observed with
-    ``start``/``stop`` only — and the middle segment is the *job type*, not the
+    ``mow-spotarea``; ``mow-border`` has been observed with ``start``/``stop``
+    only, and ``mow-auto`` with a ``stop`` so far, its ``start`` inferred
+    rather than observed — and the middle segment is the *job type*, not the
     trigger: a zone job started from the app ends on ``mow-spotarea-stop``,
     and a job started from Home Assistant on ``mow-auto-stop``, ``auto`` being
     the type the library's start command sends. Only the two edges this
