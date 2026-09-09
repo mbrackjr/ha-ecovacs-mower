@@ -264,6 +264,9 @@ async def _dump_with_a_latched_fault() -> dict:
     faulted.events.notify(
         ErrorEvent(406, "Blade-disc blocked! Blade-disc cannot rotate.")
     )
+    # Four hops, as in test_fault.py's _settle(): the bus dispatches to the
+    # latch in a task, and the latch's own handler notifies again, so one
+    # sleep(0) only gets as far as the latch.
     for _ in range(4):
         await asyncio.sleep(0)
 
