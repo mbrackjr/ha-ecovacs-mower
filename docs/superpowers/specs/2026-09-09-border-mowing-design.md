@@ -1,12 +1,16 @@
-# Border mowing from Home Assistant — design (issue #12)
+# Border mowing and ending a task from Home Assistant — design (issues #12 and #51)
 
-Status: draft, awaiting the maintainer's review. Written from the evidence on issue #12, issue #51 and PR #83, plus the code as of 0.8.0; nothing here has been tried against hardware yet.
+Status: reviewed by the maintainer on 2026-09-09, who folded issue #51 into the same PR. Written from the evidence on issue #12, issue #51 and PR #83, plus the code as of 0.8.0; nothing here has been tried against hardware yet.
 
 ## What is being built
 
-A way to start a **border job** — the GOAT's standalone "mow the perimeter" task — from Home Assistant. Issue #12 set out to find whether the existing `border_switch` entity already covered edge cutting. The captures on the issue answer that with a no: the switch is the `Edge` setting and only decides whether an ordinary job also trims the perimeter, while border mowing is its own task type with its own command, which the integration cannot send today.
+Two buttons on the mower's device page, both sending the `clean` command with a payload the integration cannot produce today.
 
-The deliverable is a `button` entity on the mower's device page that sends that command.
+**Start a border job** (issue #12) — the GOAT's standalone "mow the perimeter" task. Issue #12 set out to find whether the existing `border_switch` entity already covered edge cutting. The captures on the issue answer that with a no: the switch is the `Edge` setting and only decides whether an ordinary job also trims the perimeter, while border mowing is its own task type with its own command.
+
+**End the current task** (issue #51) — the app's *Beenden*. After a return-to-dock the mower keeps the job as resumable, and a later start resumes it instead of beginning a fresh cycle. The `stop` half of the same command ends it for good. The library already builds the exact payload; only the entity side is missing, and HA's `lawn_mower` platform has no stop feature to hang it on, so it is a button too.
+
+The two share one entity class and one description table, which is why they belong in one PR.
 
 ## Evidence the design rests on
 
@@ -33,6 +37,15 @@ The one thing the request needs that the integration does not have is the **`mid
 
 The coverage freeze a border job used to cause (issue #52) is fixed by PR #83, which is on `master`. Nothing gates this work any more.
 
+For ending a task, the reporter on issue #51 captured the app's *Beenden* on the same G1-800, on a running job:
+
+```
+q clean_V2  {"act":"stop","content":{"type":""},"bdTaskID":"<id>"}
+p clean_V2  {"code":0,"msg":"ok"}
+```
+
+The job ended and did not come back as resumable. The library's `CleanV2._get_args(STOP)` produces `{"act": "stop", "content": {"type": ""}}`, byte for byte the app's payload minus `bdTaskID`, which the mower has obeyed `charge` without and so looks optional. `CleanMower(CleanAction.STOP)` therefore already routes the right payload to the V2 family, and `_effective_action` leaves `STOP` untouched. What the non-V2 family accepts is unconfirmed — see below.
+
 ## Scope
 
 In:
@@ -40,11 +53,12 @@ In:
 - A `MowBorder` command in the patch layer, built on the same family-adaptive machinery as `MowArea`, so `families.py` stays the only place that decides the topic.
 - Learning and holding the current map id from the map stream, inside the handlers this integration owns.
 - A `button.<mower>_mow_border` entity, limited to the device classes on which the request shape is confirmed.
-- Tests, `strings.json`/`translations/en.json`/`icons.json`, README section, `hardware.py` comment block.
+- A `button.<mower>_end_task` entity on every supported mower, sending `CleanMower(CleanAction.STOP)`.
+- Tests, `strings.json`/`translations/en.json`/`icons.json`, README sections, `hardware.py` comment block.
 
 Out, deliberately:
 
-- **Ending a task (issue #51).** The stop half of the same command. It is the natural second entry in the button table this design introduces, but it is its own issue with its own hardware question (the non-V2 `stop` shape is unconfirmed on the O800 RTK the reporter has), so it gets its own PR. This design makes that PR a one-entry addition.
+- **A new `stop` payload for the non-V2 family.** `_CleanNonV2` sends `{"act": "stop", "content": {"type": "auto"}}`, the same shape it sends for `pause`, which non-V2 hardware is confirmed to accept. That is the best-founded guess available; the capture the issue still needs is the app's *Beenden* on an O-series mower, and the reporter there has been asked for it. If it shows another shape, `_CleanNonV2._get_args` grows a `STOP` branch — not this PR's problem to pre-empt.
 - **`EdgeMode`.** The settings snapshot shows `EdgeMode: 0` next to `Edge: 1`, with no entity behind it and no idea what it selects. Not touched.
 - **A `lawn_mower` entity service.** The command takes no user input, so a button is the better fit — see the decision below. Nothing stops a service being added later if an automation author asks for one.
 - **Reading the map id from `getCachedMapInfo`.** The library has the command; whether GOAT answers it is unknown. The map stream already carries the id, so the request is not needed for a first version.
@@ -88,7 +102,7 @@ Nothing in `Capabilities` has a field for this, so — unlike `MowArea`, which `
 
 ### Entity: a mower-command button
 
-`button.py` today has three kinds of button: the declarative `ENTITY_DESCRIPTIONS` (a `capability_fn` returning a `CapabilityExecute`), the lifespan resets, and `EcovacsClearFaultButtonEntity`. None fits a command that needs the device's runtime state and may refuse to run. Rather than a fourth one-off class, the design adds one description type that the #51 button can reuse:
+`button.py` today has three kinds of button: the declarative `ENTITY_DESCRIPTIONS` (a `capability_fn` returning a `CapabilityExecute`), the lifespan resets, and `EcovacsClearFaultButtonEntity`. None fits a command that needs the device's runtime state and may refuse to run. Rather than a fourth one-off class, the design adds one description type that both new buttons use:
 
 ```python
 @dataclass(kw_only=True, frozen=True)
@@ -107,6 +121,16 @@ MOWER_COMMAND_DESCRIPTIONS = (
         # No entity_category, for the reason play_sound gives: a control,
         # not diagnostics or configuration.
     ),
+    EcovacsMowerCommandButtonEntityDescription(
+        key="end_task",
+        translation_key="end_task",
+        command_fn=lambda device: CleanMower(CleanAction.STOP),
+        # Every supported mower: the V2 shape is captured, the non-V2 one is
+        # the shape pause already uses, and the reporter on #51 has the
+        # non-V2 hardware to confirm it on.
+        classes=None,
+        starts_job=False,
+    ),
 )
 ```
 
@@ -114,11 +138,11 @@ MOWER_COMMAND_DESCRIPTIONS = (
 
 `EcovacsMowerCommandButtonEntity(device, controller, description)` is built in `async_setup_entry` for every device whose `device_type is DeviceType.MOWER` and whose class passes `classes`. `async_press` calls `controller.start_polling(device)` when `starts_job` is set — a command sent from HA never produces a `StateEvent` on its own, so the tick has to be nudged, exactly as `async_mow_area` does — and then `await self._execute_command(description.command_fn(self._device))`, so an unconfirmed command is logged under this integration's logger (issue #26).
 
-Follow-up for #51, for the record: one more entry, `command_fn=lambda device: CleanMower(CleanAction.STOP)`, `classes=None`, `starts_job=False`. Not in this PR.
+The end-task button does not restart the poll: ending a job is not a leaving-the-dock command, the same reasoning that keeps `pause` from poking the controller's tick today.
 
 ### What happens after the press
 
-Nothing new. The mower answers on the `clean_V2` topic and pushes `onCleanInfo_V2` with `motionState: working`, which `handle_clean_info` maps to `CLEANING`. `OnMowBorderStart` publishes the job edge, the progress sensor computes `cuttedArea / workArea` for the strip, `OnMowBorderStop` ends it, and PR #83 keeps the coverage layer alive throughout. The restarted poll bounds a dropped push.
+Nothing new, for either button. After a border start the mower answers on the `clean_V2` topic and pushes `onCleanInfo_V2` with `motionState: working`, which `handle_clean_info` maps to `CLEANING`. `OnMowBorderStart` publishes the job edge, `OnMowBorderStop` ends it, the progress sensor works from the `getStats` pair as for any job, and PR #83 keeps the coverage layer alive throughout. The restarted poll bounds a dropped push. After an end-task press the mower reports the job over through the same pushes it uses when the app ends one; the `stop` bury point for the job type carries the trigger.
 
 ## Error handling
 
@@ -142,33 +166,31 @@ Protocol layer (`tests/deebot_patch/`, runnable on Windows with `-p no:homeassis
 
 Platform (`tests/`, CI only):
 
-- `test_button.py`: the border button exists for `77atlz` and for no other class in `SUPPORTED_CLASSES`; a press with a known map id sends `MowBorder("<mid>")` through `_execute_command` and restarts polling; a press with no map id raises `HomeAssistantError`, requests a `MowerMapInfoEvent` refresh and sends nothing; the translation/icon two-way checks cover `MOWER_COMMAND_DESCRIPTIONS`.
+- `test_button.py`: the border button exists for `77atlz` and for no other class in `SUPPORTED_CLASSES`; the end-task button exists for every mower and for no non-mower device; a border press with a known map id sends `MowBorder("<mid>")` through `_execute_command` and restarts polling; a border press with no map id raises `HomeAssistantError`, requests a `MowerMapInfoEvent` refresh and sends nothing; an end-task press sends `CleanMower(CleanAction.STOP)` and does not touch polling; the translation/icon two-way checks cover `MOWER_COMMAND_DESCRIPTIONS`.
+- `test_commands.py`: `CleanMower(CleanAction.STOP)` puts `{"act": "stop", "content": {"type": ""}}` on `clean_V2` — the captured payload — and leaves the action alone whatever the last state was.
 - `test_translations.py`: unchanged, guards `strings.json` == `translations/en.json`.
 - `test_hardware.py`: `BORDER_CLASSES` is a subset of `SUPPORTED_CLASSES`.
 
-Hardware: the reporter on issue #12 has offered to test a branch on the G1-800. That is the confirmation the `BORDER_CLASSES` entry ultimately rests on, and the PR should not merge without it.
+Hardware: the reporter on issue #12 has offered to test a branch on the G1-800. That is the confirmation the `BORDER_CLASSES` entry ultimately rests on, and the PR should not merge without it. The end-task button on the V2 family is covered by the same test run; its non-V2 shape is confirmed only when the reporter on issue #51 presses it on the O800 RTK, and the README says so until then.
 
 ## Documentation
 
-- README: a "Border mowing" section after "Zone-specific mowing", stating what the button does, that it is a separate task from the *Edge cutting* switch, which class it is confirmed on, and how to report another class. The supported-hardware table gets "border mowing confirmed" on the `77atlz` row once it is.
+- README: a "Border mowing" section after "Zone-specific mowing", stating what the button does, that it is a separate task from the *Edge cutting* switch, which class it is confirmed on, and how to report another class. The supported-hardware table gets "border mowing confirmed" on the `77atlz` row once it is. An "Ending a task" section next to it, saying what the button does, why a return-to-dock alone does not end a job, and that the non-V2 shape awaits confirmation. The `button` row in the entity table gains both.
 - `hardware.py`: the comment block above `BORDER_CLASSES`.
 - The PR description records the decisions below and why, per the maintainer's documentation tiers.
 
-## Decisions taken here that the maintainer should confirm
+## Decisions
 
-Each is a recommendation with the alternative named; the design above assumes the recommendation.
+Each was a recommendation with the alternative named; the maintainer accepted them on 2026-09-09 and changed the last one.
 
-1. **Button, not a `lawn_mower` service.** The command takes no input, a button appears on the device page and in dashboards without YAML, and issue #51's users are asking for a button too. Alternative: `ecovacs_mower.mow_border` as an entity service like `mow_area`, which is more natural from automations but invisible on the device page.
+1. **Buttons, not `lawn_mower` services.** Neither command takes input, a button appears on the device page and in dashboards without YAML, and issue #51 asks for a button outright. Alternative: entity services like `mow_area`, which are more natural from automations but invisible on the device page.
 2. **Map id from the map stream, held on `MowerStateRecord`.** Alternative: a separate `map_identity.py` record, which keeps `state_precedence.py` narrow at the cost of a second per-bus registry.
-3. **Gate by class tuple, `77atlz` only.** Alternative: every supported class with the button disabled by default on the unconfirmed ones — more discoverable, but it puts an unverified request one toggle away on hardware nobody has tested.
-4. **A reusable command-button description type**, so #51 becomes one entry. Alternative: a one-off entity class like `EcovacsClearFaultButtonEntity`, less code now and a copy later.
-5. **Entity name "Mow border"** (key `mow_border`, icon `mdi:vector-square`), next to the existing switch named "Edge cutting". Alternative: "Edge mowing", which reads closer to the switch and risks being taken for it.
-6. **Issue #51 stays a separate PR.**
+3. **Border gated by class tuple, `77atlz` only.** Alternative: every supported class with the button disabled by default on the unconfirmed ones — more discoverable, but it puts an unverified request one toggle away on hardware nobody has tested.
+4. **End task on every supported mower.** The V2 payload is captured; the non-V2 payload is the one `pause` already uses successfully on that hardware, and the reporter on #51 owns the non-V2 mower the confirmation has to come from. Gating it to `77atlz` would keep the button from the one person who asked for it.
+5. **A reusable command-button description type**, so the two buttons are two entries. Alternative: two one-off entity classes like `EcovacsClearFaultButtonEntity`.
+6. **Entity names "Mow border"** (key `mow_border`, icon `mdi:vector-square`), next to the existing switch named "Edge cutting", and **"End mowing task"** (key `end_task`, icon `mdi:stop-circle-outline`). Alternatives: "Edge mowing", which reads closer to the switch and risks being taken for it; "Stop mowing", which reads like a pause.
+7. **Issues #12 and #51 in one PR.** The maintainer's call: they share the entity class, the description table and the test run on the G1-800.
 
-## One question for the reporter
+## The question to the reporter
 
-The captured request carries `mid:2049987783`. The fixtures on PR #83 have their `mid` replaced, so nothing on record confirms that the id in the mower's map messages is the same id the app puts in the request. The design assumes it is — there is only one map — but a one-line confirmation from the raw log would turn the assumption into evidence before the branch is built. Suggested wording for issue #12, English, one paragraph, not hard-wrapped:
-
-> One check before this gets built, if you still have the 30/08 log: does the `mid` in the `onMapInfo_V2` / `onMapTrace_V2` envelopes match the `mid:2049987783` the app sent in the border request? The plan is to take the id from the map messages the integration already receives rather than ask for it separately, and that only works if they agree.
-
-Not posted; the maintainer decides whether and when.
+The captured request carries `mid:2049987783`. The fixtures on PR #83 have their `mid` replaced, so nothing on record confirms that the id in the mower's map messages is the same id the app puts in the request. The design assumes it is — there is only one map. Asked on issue #12 on 2026-09-09; if the answer is no, the map id has to come from `getCachedMapInfo` instead and the "Learning the map id" section is the part that changes.
