@@ -164,7 +164,7 @@ stored, and the entry stops asking. There is no need to delete and re-add it.
 
 ## What you get
 
-Forty-two entities on the mower's device page, across eight platforms —
+Forty-four entities on the mower's device page, across eight platforms —
 plus one per UWB beacon on the models that use them:
 
 | Platform | Count | What |
