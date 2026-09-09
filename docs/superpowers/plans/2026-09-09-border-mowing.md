@@ -17,7 +17,27 @@
 - `strings.json` and `translations/en.json` must be byte-identical (`tests/test_translations.py` guards it). Never create `sv.json`.
 - Every translation key and `icons.json` key must belong to a real entity; the button tests check both directions.
 - `deebot_patch/` is the only package allowed to touch private parts of `deebot_client`.
-- Local test command on Windows: `python -m pytest tests/deebot_patch/ -p no:homeassistant -v`. Files under `tests/` (not `tests/deebot_patch/`) import Home Assistant and only run in CI; write them, run the protocol tests, and never claim the platform tests pass from a Windows run.
+- **Interpreter.** Always `.venv/Scripts/python.exe` (CPython 3.14.7 with Home Assistant 2026.7.4, deebot-client 18.5.1, pytest 9.1.1). The bare `python` on this machine is 3.12 without `deebot_client`, and every RED step would fail with `ModuleNotFoundError: deebot_client` instead of the failure the step expects.
+- **Protocol tests** (`tests/deebot_patch/`): `.venv/Scripts/python.exe -m pytest tests/deebot_patch/ -p no:homeassistant -v`.
+- **Platform tests** (`tests/*.py`, marked `requires_ha`) also run locally, through a five-line plugin that defeats the blanket win32 skip before `tests/__init__.py` is imported. It lives at `C:/Users/RICKAR~1/AppData/Local/Temp/claude/D--private-projects-ha-ecovacs-mower/a85fa24e-d58f-4ed5-ab9b-7ba696ce0340/scratchpad/unskip_win32.py`; if that file is missing, create it with exactly this content:
+
+  ```python
+  """Defeat the blanket win32 skipif in tests/__init__.py before it is imported."""
+  import pytest
+
+
+  def pytest_configure(config):
+      import tests
+      tests.requires_ha = pytest.mark.skipif(False, reason="")
+  ```
+
+  Then run, from the repo root in the Bash tool:
+
+  ```bash
+  PYTHONPATH="C:/Users/RICKAR~1/AppData/Local/Temp/claude/D--private-projects-ha-ecovacs-mower/a85fa24e-d58f-4ed5-ab9b-7ba696ce0340/scratchpad" .venv/Scripts/python.exe -m pytest tests/test_button.py -p no:homeassistant -p unskip_win32 -v
+  ```
+
+  Only the thirteen tests that need the `hass` fixture stay CI's job; none of the tests in this plan do. Never install `pytest-homeassistant-custom-component` into the venv — it auto-loads and crashes collection. CI (`.github/workflows/test.yml`) remains the source of truth for the whole suite; a local green is evidence, not the verdict.
 - Line endings: `.gitattributes` normalises to CRLF; write files normally.
 - Work on branch `feat/12-border-mowing` (already exists, holds the spec).
 
@@ -43,15 +63,23 @@ Append to `tests/deebot_patch/test_zonal.py`:
 def test_zone_delegates_are_built_on_the_shared_task_builder() -> None:
     # The border command (issue #12) sends the same nested shape with another
     # type string; one builder keeps the two from drifting apart.
-    from custom_components.ecovacs_mower.deebot_patch.commands import _TaskClean
+    from custom_components.ecovacs_mower.deebot_patch.commands import (
+        _NoActionRewrite,
+        _TaskClean,
+    )
 
     assert issubclass(_ZoneCleanNonV2, _TaskClean)
     assert issubclass(_ZoneCleanV2, _TaskClean)
+    # The builder must still bypass Clean._execute's start/resume rewrite: the
+    # bypass only works when _NoActionRewrite comes before Clean in the MRO.
+    for delegate, topic_base in ((_ZoneCleanNonV2, Clean), (_ZoneCleanV2, CleanV2)):
+        mro = delegate.__mro__
+        assert mro.index(_NoActionRewrite) < mro.index(topic_base)
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `python -m pytest tests/deebot_patch/test_zonal.py -p no:homeassistant -v`
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/test_zonal.py -p no:homeassistant -v`
 Expected: `ImportError: cannot import name '_TaskClean'`
 
 - [ ] **Step 3: Add the builder to `commands.py`**
@@ -98,8 +126,8 @@ and change the import line `from .commands import _AdaptiveFamily, _NoActionRewr
 
 - [ ] **Step 5: Run the protocol tests**
 
-Run: `python -m pytest tests/deebot_patch/ -p no:homeassistant -v`
-Expected: all pass, including the existing `test_spot_area_payload_uses_saved_area_ids`, `test_v2_spot_area_payload_has_the_same_nested_shape` and `test_clean_still_rewrites_the_action_and_our_delegates_still_skip_it`.
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/ -p no:homeassistant -v`
+Expected: all pass, including the existing `test_spot_area_payload_uses_saved_area_ids` and `test_v2_spot_area_payload_has_the_same_nested_shape` (the payload is unchanged) and the new MRO assertion (the rewrite bypass survived the move). `test_contract.py`'s `test_clean_still_rewrites_the_action_and_our_delegates_still_skip_it` pins the other half — that `Clean` still has a rewrite to bypass — and is unaffected.
 
 - [ ] **Step 6: Commit**
 
@@ -117,7 +145,7 @@ git commit -m "refactor: share the task-start payload builder between task types
 - Test: `tests/deebot_patch/test_state_precedence.py`
 
 **Interfaces:**
-- Produces: `MowerStateRecord.map_id: str | None` (default `None`); `MowerStateRecord.note_map(mid: object) -> None`; module function `map_id_for(event_bus: EventBus) -> str | None`.
+- Produces: `MowerStateRecord.map_id: str | None` (default `None`); `MowerStateRecord.note_map(mid: object, using: object = None) -> None`; module function `map_id_for(event_bus: EventBus) -> str | None`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -149,6 +177,28 @@ def test_note_map_ignores_everything_that_is_not_a_map() -> None:
     assert record.map_id == "7"
 
 
+def test_note_map_skips_a_map_the_mower_is_not_using() -> None:
+    # A getMapInfo_V2 answer can carry fragments for a stored map that is not
+    # the active one; last-writer-wins would then name the wrong map. The
+    # envelope says which is which with "using", so an explicit 0 is skipped.
+    record = MowerStateRecord()
+    record.note_map("7", using=1)
+    record.note_map("8", using=0)
+    assert record.map_id == "7"
+    record.note_map("9", using="0")
+    assert record.map_id == "7"
+
+
+def test_note_map_accepts_an_envelope_without_using() -> None:
+    # onMapTrack and onMapTrace never carry the field; absence is not "not
+    # using", it is "the message does not say", and the id is still good.
+    record = MowerStateRecord()
+    record.note_map("7", using=None)
+    assert record.map_id == "7"
+    record.note_map("8")
+    assert record.map_id == "8"
+
+
 def test_moving_does_not_forget_the_map() -> None:
     # Leaving the dock does not change the map, unlike the suppressed state.
     record = MowerStateRecord()
@@ -173,7 +223,7 @@ def test_map_id_for_reads_the_record_and_is_none_for_strangers() -> None:
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `python -m pytest tests/deebot_patch/test_state_precedence.py -p no:homeassistant -v`
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/test_state_precedence.py -p no:homeassistant -v`
 Expected: `AttributeError: 'MowerStateRecord' object has no attribute 'map_id'` and `ImportError` for `map_id_for`.
 
 - [ ] **Step 3: Implement**
@@ -201,16 +251,27 @@ In `MowerStateRecord`, add the field and method:
     suppressed: State | None = None
     map_id: str | None = None
 
-    def note_map(self, mid: object) -> None:
+    def note_map(self, mid: object, using: object = None) -> None:
         """Remember the map the mower reports, from any map message's envelope.
 
         ``"0"`` is not a map: it is what the library's own ``OnCachedMapInfo``
         skips as "no map", and what an idle mower's ``onMapTrack`` envelopes
         carry. Anything that is not a non-empty string is ignored too, so a
         malformed envelope cannot erase an id a good one taught.
+
+        ``using`` is the envelope's own word on whether this is the active
+        map. ``onMI``, ``onArI``, ``onSpecialContour`` and ``onMapInfo_V2``
+        carry it; ``onMapTrack`` and ``onMapTrace`` do not. An explicit ``0``
+        (or ``"0"``) is a stored map the mower is not on, and a border job
+        must not name it — the answer to ``getMapInfo_V2`` may carry such a
+        map alongside the active one. An absent field says nothing and the
+        id is taken as is.
         """
-        if isinstance(mid, str) and mid not in ("", "0"):
-            self.map_id = mid
+        if not isinstance(mid, str) or mid in ("", "0"):
+            return
+        if using in (0, "0"):
+            return
+        self.map_id = mid
 ```
 
 `move()` is untouched: it must not clear `map_id`.
@@ -231,7 +292,7 @@ def map_id_for(event_bus: EventBus) -> str | None:
 
 - [ ] **Step 4: Run the tests**
 
-Run: `python -m pytest tests/deebot_patch/test_state_precedence.py -p no:homeassistant -v`
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/test_state_precedence.py -p no:homeassistant -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -291,6 +352,25 @@ def test_a_map_id_of_zero_teaches_nothing() -> None:
     assert map_id_for(event_bus) is None
 
 
+def test_a_fragment_for_a_map_not_in_use_teaches_nothing() -> None:
+    # The envelope's own "using" flag, passed through to the record: a stored
+    # but inactive map in a getMapInfo_V2 answer must not become the border
+    # job's target. Constructed, not captured — no fixture has using 0.
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
+        map_id_for,
+        register,
+    )
+
+    event_bus = Mock()
+    register(event_bus)
+    fragment = deepcopy(FIXTURES["on_map_info_v2_g1800"][0]["payload"])
+    fragment["body"]["data"]["mid"] = "987654321"
+    fragment["body"]["data"]["using"] = 0
+    OnMapInfo.handle(event_bus, fragment)
+
+    assert map_id_for(event_bus) is None
+
+
 def test_an_undecodable_blob_still_teaches_the_map_id() -> None:
     from custom_components.ecovacs_mower.deebot_patch.state_precedence import (
         map_id_for,
@@ -323,8 +403,8 @@ def test_an_unregistered_bus_records_no_map_id() -> None:
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `python -m pytest tests/deebot_patch/test_map_messages.py -p no:homeassistant -v -k map_id`
-Expected: the first and third fail with `assert None == "123456789"` / `assert None == "1"`; the other two already pass (nothing is recorded yet) — that is fine, they pin the behaviour that must survive Step 3.
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/test_map_messages.py -p no:homeassistant -v -k map_id`
+Expected: `test_the_first_fragment_of_a_map_message_teaches_the_map_id` and `test_an_undecodable_blob_still_teaches_the_map_id` fail with `assert None == "123456789"` / `assert None == "1"`; the other three already pass (nothing is recorded yet) — that is fine, they pin the behaviour that must survive Step 3.
 
 - [ ] **Step 3: Implement**
 
@@ -340,15 +420,17 @@ In `_MapMessage._handle_body_data_dict`, insert before `info = data.get("info")`
         # Every map message names the map in its envelope, and a border job
         # has to name it back (issue #12). Recorded here, ahead of the fragment
         # buffering, so the first fragment teaches it and a blob that never
-        # completes or never decodes still does. Only for a registered bus:
-        # an ordinary vacuum on the same account reaches this handler too.
+        # completes or never decodes still does. "using" goes along so a
+        # stored-but-inactive map is not mistaken for the current one. Only
+        # for a registered bus: an ordinary vacuum on the same account reaches
+        # this handler too.
         if (record := record_for(event_bus)) is not None:
-            record.note_map(data.get("mid"))
+            record.note_map(data.get("mid"), data.get("using"))
 ```
 
 - [ ] **Step 4: Run the protocol tests**
 
-Run: `python -m pytest tests/deebot_patch/ -p no:homeassistant -v`
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/ -p no:homeassistant -v`
 Expected: all pass.
 
 - [ ] **Step 5: Commit**
@@ -421,6 +503,16 @@ def test_non_v2_border_payload_has_the_same_nested_shape() -> None:
     assert command._args == _CAPTURED_ARGS
 
 
+def test_border_delegates_bypass_the_action_rewrite() -> None:
+    # Clean._execute would turn this start into a resume while the mower reads
+    # paused; the bypass only holds with _NoActionRewrite ahead of Clean.
+    from custom_components.ecovacs_mower.deebot_patch.commands import _NoActionRewrite
+
+    for delegate, topic_base in ((_BorderCleanNonV2, Clean), (_BorderCleanV2, CleanV2)):
+        mro = delegate.__mro__
+        assert mro.index(_NoActionRewrite) < mro.index(topic_base)
+
+
 @pytest.mark.parametrize("map_id", ["", "0"])
 def test_mow_border_refuses_a_map_id_that_is_not_a_map(map_id: str) -> None:
     with pytest.raises(ValueError, match="map"):
@@ -463,7 +555,7 @@ async def test_mow_border_falls_back_to_v2_and_commits_family() -> None:
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `python -m pytest tests/deebot_patch/test_border.py -p no:homeassistant -v`
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/test_border.py -p no:homeassistant -v`
 Expected: `ModuleNotFoundError: No module named 'custom_components.ecovacs_mower.deebot_patch.border'`
 
 - [ ] **Step 3: Create `border.py`**
@@ -569,8 +661,8 @@ class MowBorder(_AdaptiveFamily, Clean):
 
 - [ ] **Step 4: Run the tests**
 
-Run: `python -m pytest tests/deebot_patch/test_border.py -p no:homeassistant -v`
-Expected: PASS, all eight.
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/test_border.py -p no:homeassistant -v`
+Expected: PASS, all nine.
 
 - [ ] **Step 5: Commit**
 
@@ -607,7 +699,7 @@ def test_border_classes_are_the_ones_with_a_captured_request() -> None:
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `python -m pytest tests/deebot_patch/test_hardware.py -p no:homeassistant -v -k border_classes`
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/test_hardware.py -p no:homeassistant -v -k border_classes`
 Expected: `ImportError: cannot import name 'BORDER_CLASSES'`
 
 - [ ] **Step 3: Add the tuple**
@@ -627,7 +719,7 @@ BORDER_CLASSES = ("77atlz",)
 
 - [ ] **Step 4: Run the tests**
 
-Run: `python -m pytest tests/deebot_patch/test_hardware.py -p no:homeassistant -v`
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/test_hardware.py -p no:homeassistant -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -673,7 +765,7 @@ async def test_stop_goes_out_untouched_whatever_the_last_state_was() -> None:
     assert command._delegate(Family.V2)._args == {"act": "stop", "content": {"type": ""}}
 ```
 
-Run: `python -m pytest tests/deebot_patch/test_commands.py -p no:homeassistant -v -k stop_goes_out`
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/test_commands.py -p no:homeassistant -v -k stop_goes_out`
 Expected: PASS already — this is the evidence the button rests on, not new behaviour. If it fails, stop and report: the library's shape has changed.
 
 - [ ] **Step 2: Write the failing platform tests**
@@ -842,7 +934,13 @@ Also update the existing `test_no_stale_button_translations_or_icons` so the rev
 
 and add `MOWER_COMMAND_DESCRIPTIONS` to that test's import from `custom_components.ecovacs_mower.button`.
 
-These tests import Home Assistant and cannot run on Windows. Do not attempt to run them locally; CI runs them.
+Run them RED, with the unskip plugin from Global Constraints:
+
+```bash
+PYTHONPATH="C:/Users/RICKAR~1/AppData/Local/Temp/claude/D--private-projects-ha-ecovacs-mower/a85fa24e-d58f-4ed5-ab9b-7ba696ce0340/scratchpad" .venv/Scripts/python.exe -m pytest tests/test_button.py -p no:homeassistant -p unskip_win32 -v
+```
+
+Expected: the seven new tests and the edited `test_no_stale_button_translations_or_icons` fail with `ImportError: cannot import name 'MOWER_COMMAND_DESCRIPTIONS'`; the other eight still pass.
 
 - [ ] **Step 3: Implement the button platform**
 
@@ -1037,10 +1135,10 @@ In `strings.json`, `entity.button` becomes (alphabetical, matching the file's ha
 Make the identical edit in `translations/en.json`. Then verify:
 
 ```bash
-python -c "import json;a=json.load(open('custom_components/ecovacs_mower/strings.json'));b=json.load(open('custom_components/ecovacs_mower/translations/en.json'));print('IDENTICAL' if a==b else 'DIFFER')"
+cmp custom_components/ecovacs_mower/strings.json custom_components/ecovacs_mower/translations/en.json && echo IDENTICAL
 ```
 
-Expected: `IDENTICAL`. (`test_translations.py` compares the raw text, so also make sure formatting matches: copy the block verbatim.)
+Expected: `IDENTICAL`. (`test_translations.py` compares the raw text, so formatting must match too: copy the block verbatim.)
 
 In `icons.json`, `entity.button` gains two entries:
 
@@ -1055,13 +1153,18 @@ In `icons.json`, `entity.button` gains two entries:
 
 placed after `clear_fault` and before `play_sound`.
 
-- [ ] **Step 5: Run what can run locally**
+- [ ] **Step 5: Run GREEN, locally**
 
-Run: `python -m pytest tests/deebot_patch/ -p no:homeassistant -v`
+Run: `.venv/Scripts/python.exe -m pytest tests/deebot_patch/ -p no:homeassistant -v`
 Expected: all pass.
 
-Run: `python -c "import ast,sys;ast.parse(open('custom_components/ecovacs_mower/button.py').read())"`
-Expected: no output (the module parses). Importing it needs Home Assistant, so that is as far as Windows gets.
+Run:
+
+```bash
+PYTHONPATH="C:/Users/RICKAR~1/AppData/Local/Temp/claude/D--private-projects-ha-ecovacs-mower/a85fa24e-d58f-4ed5-ab9b-7ba696ce0340/scratchpad" .venv/Scripts/python.exe -m pytest tests/test_button.py tests/test_translations.py -p no:homeassistant -p unskip_win32 -v
+```
+
+Expected: every test in both files passes — the seven new button tests, the reverse translation/icon check with the new keys, and the byte-identity of `strings.json` and `translations/en.json`.
 
 - [ ] **Step 6: Commit**
 
@@ -1072,22 +1175,31 @@ git commit -m "feat: buttons to start a border job and to end the current task #
 
 ---
 
-### Task 7: README
+### Task 7: README and CLAUDE.md
 
 **Files:**
-- Modify: `README.md:85` (hardware table, `77atlz` row), `README.md:176` (entity table, `button` row), and a new section after "Zone-specific mowing" (ends at line 215, before `### When a run stops because of rain`).
+- Modify: `README.md` — three table rows and two new sections. Anchor every edit on the row's or paragraph's text, never on a line number; the numbers below are for orientation only and are one off in places.
+- Modify: `CLAUDE.md` — the architecture list under "The patch layer is the only connection to deebot-client's internals".
 
-- [ ] **Step 1: Update the `button` row of the entity table**
+- [ ] **Step 1: Update the `button` row of the "What you get" entity table**
 
-Replace the row at line 176 with:
+Find the row that begins `| \`button\` | 6 |` (under `## What you get`, near line 177) and replace the whole row with:
 
 ```markdown
 | `button` | 8 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), "Clear fault" (releases the latched fault; see below), "End mowing task" (ends the current job for good; see below) and, on the G1-800, "Mow border" (starts a border job; see below) |
 ```
 
+- [ ] **Step 1b: Update the `button` row of the "Entities disabled by default" table**
+
+Find the row that begins `| \`button\` | 4 of 6 |` (under `### Entities disabled by default`, near line 513) and replace the whole row with:
+
+```markdown
+| `button` | 4 of 8 | the four consumable-lifespan resets (blade, lens brush, trimmer brush, weed rope) — "Locate mower", "Clear fault", "End mowing task" and "Mow border" are enabled by default |
+```
+
 - [ ] **Step 2: Update the `77atlz` row of the hardware table**
 
-Append to the end of that row's "Confirmed by" cell, before the closing `|`:
+Find the row that begins `| **Ecovacs GOAT G1-800** | \`77atlz\` |` (under `## Hardware support`, near line 84 — the row *above* the A1600 LiDAR Pro) and append to the end of its "Confirmed by" cell, before the closing `|`:
 
 ```
 ; border mowing is built for this class from the request captured in [#12](https://github.com/nord-/ha-ecovacs-mower/issues/12) and awaits confirmation on hardware
@@ -1097,7 +1209,7 @@ Once the reporter confirms the branch on the G1-800, the executor of the release
 
 - [ ] **Step 3: Add the two sections**
 
-Insert after the paragraph ending "range does not imply that the mower has a zone with that ID." (line 215) and before `### When a run stops because of rain`:
+Insert after the paragraph ending "range does not imply that the mower has a zone with that ID." (the last paragraph of `### Zone-specific mowing`) and before the heading `### When a run stops because of rain`:
 
 ```markdown
 ### Border mowing
@@ -1119,13 +1231,35 @@ Wrap the new paragraphs the way the surrounding README prose is wrapped (the fil
 
 - [ ] **Step 4: Check the tables are still one row per line**
 
-Run: `grep -c "^| \`button\`" README.md; grep -c "^### " README.md`
-Expected: `1`, and the heading count is two higher than before the edit (it was 12).
+Run: `grep -c "^| \`button\` | " README.md; grep -c "^### " README.md`
+Expected: `2` (one row per table, each on one line) and `14` (two more `###` headings than the 12 before the edit).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Record the architecture in CLAUDE.md**
+
+In the bullet list under "The patch layer is the only connection to deebot-client's internals":
+
+Append to the `hardware.py` bullet, after the sentence ending "(`e4gqia` so far).":
+
+```
+`BORDER_CLASSES` is the same kind as `ZONE_AREA_CLASSES`: membership means the border-job request shape is captured on that class, and only those get the `mow_border` button (`77atlz` so far). It gates a button rather than a capability, because `Capabilities` has no field for it — `button.py` checks the class string directly.
+```
+
+Insert a new bullet directly after the `zonal.py` bullet:
+
+```
+- `border.py` — `MowBorder`, the `border` task-start command (issue #12), built on the same `_AdaptiveFamily` machinery as `MowArea` and sharing `_TaskClean`, the `{"type", "value"}` payload builder in `commands.py`, with it. Needs the id of the map in use, which it does not fetch: it is handed one by `button.py`, which reads it from `state_precedence.map_id_for()`. Exposed as the `mow_border` button, alongside `end_task`, which is `CleanMower(CleanAction.STOP)` and needs nothing from this module (issue #51).
+```
+
+Replace the `state_precedence.py` bullet with:
+
+```
+- `state_precedence.py` — per-device record, keyed by `EventBus`, of the facts the handlers learn from the stream: that the mower is docked, which beats a paused plan, and what the suppressed state was (issue #67); and the id of the map the mower is using, written by `map_messages._MapMessage` from every map message's envelope and read by the border button (issue #12). `register()` is also the marker that says a bus belongs to a patched mower rather than a vacuum on the same account.
+```
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add README.md
+git add README.md CLAUDE.md
 git commit -m "docs: describe the border-mowing and end-task buttons #12 #51"
 ```
 
@@ -1133,8 +1267,10 @@ git commit -m "docs: describe the border-mowing and end-task buttons #12 #51"
 
 ## Self-review
 
-**Spec coverage.** `MowBorder` with delegates and `ValueError` — Task 4. Shared payload builder — Task 1. Map id on `MowerStateRecord`, `note_map`, `map_id_for`, `move()` leaving it — Task 2. Handler writes it before buffering, registered buses only — Task 3. `BORDER_CLASSES` and comment — Task 5. Description type, both entries, class gate, `starts_job`, refresh-then-raise, `_execute_command`, no poll on end task — Task 6. Strings/translations/icons — Task 6. `CleanMower(STOP)` V2 shape pinned — Task 6 Step 1. README sections, table rows — Task 7. Hardware confirmation on the G1-800 is a merge gate, not a task.
+**Spec coverage.** `MowBorder` with delegates, `ValueError` and the rewrite bypass pinned — Task 4. Shared payload builder with its bypass pinned — Task 1. Map id on `MowerStateRecord`, `note_map(mid, using)`, `map_id_for`, `move()` leaving it — Task 2. Handler writes id and `using` before buffering, registered buses only — Task 3. `BORDER_CLASSES` and comment — Task 5. Description type, both entries, class gate, `starts_job`, refresh-then-raise, `_execute_command`, no poll on end task — Task 6. Strings/translations/icons — Task 6. `CleanMower(STOP)` V2 shape pinned — Task 6 Step 1. README sections, three table rows, CLAUDE.md architecture — Task 7. Hardware confirmation on the G1-800 is a merge gate, not a task.
 
-**Placeholders.** None: every step has its code or its exact command.
+**Placeholders.** None: every step has its code or its exact command, and every command names the venv interpreter.
 
-**Type consistency.** `_TaskClean(task: str, value: str)` in Task 1 is what Task 4's `_BorderClean` calls. `map_id_for(event_bus) -> str | None` in Task 2 is what Task 3 asserts on and Task 6's `_border_command` reads. `MowBorder(map_id: str)` in Task 4 is what Task 6's tests compare against. `BORDER_CLASSES` in Task 5 is the `classes` value in Task 6. `EcovacsMowerCommandButtonEntity(device, controller, description)` matches its tests and `_mower_command_entities`.
+**Type consistency.** `_TaskClean(task: str, value: str)` in Task 1 is what Task 4's `_BorderClean` calls. `note_map(mid, using=None)` in Task 2 is what Task 3's handler calls with two positional arguments. `map_id_for(event_bus) -> str | None` in Task 2 is what Task 3 asserts on and Task 6's `_border_command` reads. `MowBorder(map_id: str)` in Task 4 is what Task 6's tests compare against. `BORDER_CLASSES` in Task 5 is the `classes` value in Task 6. `EcovacsMowerCommandButtonEntity(device, controller, description)` matches its tests and `_mower_command_entities`.
+
+**Review 2026-09-09.** The maintainer's review found the bare `python` (3.12, no `deebot_client`), two README line numbers one row off, the untouched "Entities disabled by default" table, the missing `using` gate, the local platform-test recipe, the missing CLAUDE.md update and the contract gap on the shared builder. All seven are folded in above.

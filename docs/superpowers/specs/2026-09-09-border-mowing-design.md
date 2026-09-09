@@ -88,7 +88,9 @@ class MowBorder(_AdaptiveFamily, Clean):
 
 The rule in `CLAUDE.md` decides where this lives: state derived from the event stream is written by the handlers, never by a subscription, because `EventBus.notify` drops repeats before subscribers run and dispatches through `create_task`.
 
-`MowerStateRecord` in `state_precedence.py` gains a `map_id: str | None` field and a `note_map(mid)` method. `_MapMessage._handle_body_data_dict` in `map_messages.py` calls it with `data.get("mid")` **before** the fragment buffering, so an id is learned from the very first fragment, even of a blob that later turns out undecodable. The method ignores `None`, non-strings, `""` and `"0"`, and is otherwise last-writer-wins: the mower reports one map, and a map switch in the app should be followed.
+`MowerStateRecord` in `state_precedence.py` gains a `map_id: str | None` field and a `note_map(mid, using)` method. `_MapMessage._handle_body_data_dict` in `map_messages.py` calls it with `data.get("mid")` and `data.get("using")` **before** the fragment buffering, so an id is learned from the very first fragment, even of a blob that later turns out undecodable. The method ignores `None`, non-strings, `""` and `"0"`, and is otherwise last-writer-wins: the mower reports one map, and a map switch in the app should be followed.
+
+`using` is the envelope's own word on whether the fragment describes the active map. Every captured `onMI`, `onArI`, `onSpecialContour` and `onMapInfo_V2` envelope carries `using: 1`; `onMapTrack` and `onMapTrace` do not carry the field. A user with several stored maps may get fragments for an inactive one in the answer to `getMapInfo_V2 {"type": "0"}`, and last-writer-wins would then name the wrong map. So an explicit `using` of `0` (or `"0"`) is skipped, and an absent field is taken as "the message does not say" and the id accepted. That is the code-side answer to the open question below: even if the map id in the stream and the one the app sends could differ for an inactive map, the active one is the only one recorded.
 
 Why the existing record rather than a new module: `state_precedence.register()` is already the marker that says "this bus belongs to a patched mower", which is what keeps a Deebot vacuum on the same account from being mistaken for one — `MESSAGES` is global and the map handlers are reached for every JSON device. A second registry would duplicate that marker and its lifetime. The module docstring is widened from "the little state needed to prefer docked over paused" to "the per-device facts the handlers learn from the stream", and the rest is unchanged. A `map_id_for(event_bus)` helper alongside `record_for` keeps callers from reaching into the record.
 
@@ -156,15 +158,15 @@ Nothing new, for either button. After a border start the mower answers on the `c
 
 ## Testing
 
-Protocol layer (`tests/deebot_patch/`, runnable on Windows with `-p no:homeassistant`):
+Protocol layer (`tests/deebot_patch/`, runnable on Windows with `.venv/Scripts/python.exe -m pytest … -p no:homeassistant`):
 
 - `test_border.py`: both delegates produce the captured payload byte for byte on their own topic; `MowBorder` is a `Clean` with `NAME == "clean"`; equality includes the map id; `""` and `"0"` are rejected; executes on non-V2 first, falls back to V2 and commits the family (mirroring `test_zonal.py`, sharing its transport helpers).
-- `test_state_precedence.py`: `note_map` ignores `None`, `""`, `"0"` and non-strings; keeps the latest valid id; `move()` leaves it alone.
-- `test_map_messages.py`: a single fragment of a multipart blob is enough to record the id; a blob with `mid` `"0"` records nothing; an undecodable blob still records the id.
+- `test_state_precedence.py`: `note_map` ignores `None`, `""`, `"0"` and non-strings; skips `using` `0`/`"0"` and accepts an absent `using`; keeps the latest valid id; `move()` leaves it alone.
+- `test_map_messages.py`: a single fragment of a multipart blob is enough to record the id; a blob with `mid` `"0"` records nothing; a fragment with `using: 0` records nothing; an undecodable blob still records the id; an unregistered bus gets no record.
 - `test_zonal.py`: unchanged assertions pass against the shared payload builder — that is the regression check for the refactor.
 - `test_contract.py`: the shared builder still bypasses `Clean._execute`'s rewrite.
 
-Platform (`tests/`, CI only):
+Platform (`tests/`; runnable on Windows through the `unskip_win32` plugin the plan describes, since none of these need the `hass` fixture; CI stays the verdict):
 
 - `test_button.py`: the border button exists for `77atlz` and for no other class in `SUPPORTED_CLASSES`; the end-task button exists for every mower and for no non-mower device; a border press with a known map id sends `MowBorder("<mid>")` through `_execute_command` and restarts polling; a border press with no map id raises `HomeAssistantError`, requests a `MowerMapInfoEvent` refresh and sends nothing; an end-task press sends `CleanMower(CleanAction.STOP)` and does not touch polling; the translation/icon two-way checks cover `MOWER_COMMAND_DESCRIPTIONS`.
 - `test_commands.py`: `CleanMower(CleanAction.STOP)` puts `{"act": "stop", "content": {"type": ""}}` on `clean_V2` — the captured payload — and leaves the action alone whatever the last state was.
@@ -176,8 +178,10 @@ Hardware: the reporter on issue #12 has offered to test a branch on the G1-800. 
 ## Documentation
 
 - README: a "Border mowing" section after "Zone-specific mowing", stating what the button does, that it is a separate task from the *Edge cutting* switch, which class it is confirmed on, and how to report another class. The supported-hardware table gets "border mowing confirmed" on the `77atlz` row once it is. An "Ending a task" section next to it, saying what the button does, why a return-to-dock alone does not end a job, and that the non-V2 shape awaits confirmation. The `button` row in the entity table gains both.
+- README: the `button` row of the "Entities disabled by default" table goes from 4 of 6 to 4 of 8, naming the two new buttons as enabled by default.
 - `hardware.py`: the comment block above `BORDER_CLASSES`.
-- The PR description records the decisions below and why, per the maintainer's documentation tiers.
+- `CLAUDE.md`: the architecture list gains `border.py`, the `hardware.py` bullet gains `BORDER_CLASSES`, and the `state_precedence.py` bullet says it now also holds the map id. Broad strokes belong there per the maintainer's documentation tiers.
+- The PR description records the decisions below and why.
 
 ## Decisions
 
