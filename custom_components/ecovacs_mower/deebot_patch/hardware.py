@@ -42,15 +42,17 @@ _LOGGER = logging.getLogger(__name__)
 #   2px96q — GOAT O800 RTK (user-verified, issue #24). A second class string
 #            for the same hardware: upstream's 2px96q.py is byte-identical to
 #            9bts2s.py.
-#   77atlz — GOAT G1-800 (issue #30, firmware 1.36.208 — controls not
-#            confirmed). Upstream's 77atlz.py is byte-identical to 9bts2s.py,
-#            docstring included, so the O800 RTK's patch applies unchanged —
-#            but this firmware branch inverts the quirk the patch exists for.
-#            Issue #42 has the A/B on one install: patched, getCleanInfo
-#            answers errno 500 on every poll and clean is never acknowledged;
-#            unpatched, getCleanInfo_V2 answers first try and clean_V2 is
-#            acked in 526 ms. The class stays here because the family is now
-#            chosen at runtime rather than by this tuple — see families.py.
+#   77atlz — GOAT G1-800 (issue #30, firmware 1.36.208 — controls
+#            user-verified from the lawn_mower entity, issue #74: start,
+#            pause/resume and dock all obeyed on 0.7.2). Upstream's 77atlz.py
+#            is byte-identical to 9bts2s.py, docstring included, so the O800
+#            RTK's patch applies unchanged — but this firmware branch inverts
+#            the quirk the patch exists for. Issue #42 has the A/B on one
+#            install: patched, getCleanInfo answers errno 500 on every poll
+#            and clean is never acknowledged; unpatched, getCleanInfo_V2
+#            answers first try and clean_V2 is acked in 526 ms. The class
+#            stays here because the family is now chosen at runtime rather
+#            than by this tuple — see families.py.
 #   e4gqia — GOAT A1600 LiDAR Pro (confirmed, PR #29, firmware 1.11.31).
 #            Upstream names this A3000 LiDAR Pro; its module is byte-identical
 #            to 9bts2s.py apart from the docstring, so the O800's patch
