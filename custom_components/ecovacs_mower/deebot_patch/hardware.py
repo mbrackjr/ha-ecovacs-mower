@@ -95,7 +95,17 @@ SUPPORTED_CLASSES: dict[str, MowerProfile] = {
     "xmp9ds": MowerProfile("xmp9ds"),
 }
 
+# ``spotArea`` has only been verified on the A1600 LiDAR Pro. Keep it limited to
+# that class until the payload shape has been verified on other firmware/classes.
 ZONE_AREA_CLASSES = ("e4gqia",)
+
+# Classes on which the border-job request shape has been captured from the
+# app (issue #12). Like ZONE_AREA_CLASSES, membership means "confirmed", not
+# "patched": the button is only built for these, because the non-V2 shape is
+# a guess nobody has tested — see border.py. Widening this tuple is how a
+# second class gains the button.
+#   77atlz — GOAT G1-800, firmware 1.36.208: clean_V2 with
+#            {"type": "border", "value": "mid:<mid>"}, acknowledged code 0.
 BORDER_CLASSES = ("77atlz",)
 
 
@@ -105,19 +115,62 @@ def profile_for_class(class_: str) -> MowerProfile | None:
 
 
 async def patch_device_info(class_: str) -> None:
-    """Replace the cached device definition with one where the mower bugs are fixed."""
+    """Replace the cached device definition with one where the mow bugs are fixed.
+
+    Six corrections:
+
+    * ``clean.action.command``: ``CleanV2`` publishes on ``clean_V2``, which
+      GOAT firmware ignores. Swapped for ``CleanMower`` on ``clean``.
+    * ``clean.action.area``: expose the verified GOAT ``spotArea`` area-clean
+      command for the A1600 LiDAR Pro. Existing library area commands are
+      preserved for other classes.
+    * ``state``: the clean-info answer is a constant ``idle`` regardless of
+      what the mower is actually doing (issue #48), and the library ran the
+      charge and clean-info answers concurrently in one ``TaskGroup`` — a
+      race that let a mower parked on its charger read as docked or as paused
+      depending on which answer landed last (issue #67). Swapped for
+      ``MowerStateRefresh``, one sequential command that awaits the charge
+      half before asking for clean info, so the record is written before the
+      clean-info answer is interpreted; the clean-info half picks its own
+      command name, ``getCleanInfo`` or ``getCleanInfo_V2``, from whichever
+      the mower answers at runtime — see ``families.py``.
+    * ``stats.clean``: ``GetStats`` drops ``mowedArea``, the one number that
+      moves while a job runs. Swapped for ``GetStatsMower``.
+    * ``life_span.get``: ``GetLifeSpan`` raises on the ``uwbCell`` entries a
+      beacon-guided mower reports, which loses the beacons and every component
+      listed after them. Swapped for ``GetLifeSpanMower``.
+    * ``MowerProtectStateEvent``, ``MowerRainDelayEvent``, ``MowerStatsEvent``
+      and ``MowerBeaconsEvent``: given the refresh commands they had none of.
+    * ``MowerMapInfoEvent``: given ``GetMapInfoV2``, without which firmware
+      1.36 never sends the lawn boundary at all — it answers the request and
+      pushes at no other time (issue #81).
+
+    The call is idempotent and does nothing for classes outside
+    ``SUPPORTED_CLASSES``.
+
+    **Must be called before ``ApiClient.get_devices()``.** That method calls
+    ``get_static_device_info()`` and bakes the result into ``DeviceInfo.static``,
+    which is a frozen dataclass. Patching the cache afterwards means the devices
+    already got the unpatched capabilities.
+    """
     if class_ not in SUPPORTED_CLASSES:
         _LOGGER.debug("Device class %s not supported, not patching", class_)
         return
 
     base = await get_static_device_info(class_)
     if base is None:
+        # Upstream returns None for unknown classes; no fallback definition
+        # exists, so there is nothing to patch here.
         _LOGGER.debug("No device definition for %s, skipping patch", class_)
         return
 
     capabilities = base.capabilities
     profile = profile_for_class(class_)
     area_parameters = profile is not None and profile.area_parameters
+    # Most classes can return early once the common patch is already present.
+    # The A1600 area-parameter capability is different: it is an additional
+    # event mapping, so it must still be installed if another patch path has
+    # already supplied CleanMower.
     if capabilities.clean.action.command is CleanMower and not area_parameters:
         return
 
@@ -136,16 +189,58 @@ async def patch_device_info(class_: str) -> None:
             ),
         ),
         state=CapabilityEvent(StateEvent, [MowerStateRefresh()]),
+        # Only stats.clean is replaced; total and report are the library's
+        # own and are carried through by replace().
         stats=replace(
             capabilities.stats,
             clean=CapabilityEvent(StatsEvent, [GetStatsMower()]),
         ),
+        # Only the get command is replaced. types decides which lifespan
+        # entities are built and reset is the button behind them; both are the
+        # library's own and are carried through by replace(). The request keeps
+        # the same component list for the same reason the stats request keeps
+        # its name: the device answers with everything it has regardless, so
+        # widening it would buy nothing and diverge further from upstream.
         life_span=replace(
             capabilities.life_span,
             get=[GetLifeSpanMower(capabilities.life_span.types)],
         ),
     )
-
+    # Neither the protection flags nor the mowing progress is a library
+    # capability, so there is no field to hang a CapabilityEvent on and nothing
+    # to hand dataclasses.replace.
+    # get_refresh_commands() reads one mapping, built once in __post_init__ from
+    # the dataclass fields, so the entry goes straight in there — the same
+    # object.__setattr__ on the same frozen instance that __post_init__ does.
+    #
+    # Without it the event bus finds no command when the first binary sensor
+    # subscribes, and the device only pushes onProtectState when a flag flips:
+    # through a dry, uneventful spell nothing arrives at all, so the entities
+    # read "unknown" until the weather changes (issue #31). MowerRainDelayEvent
+    # is the same trap one setting over: onRainDelay arrives only when somebody
+    # changes the rain sensor, so its switch and number would sit at "unknown"
+    # until the owner next opened the app (issue #54).
+    #
+    # This has to stay below the replace() above and cannot move up: replace()
+    # re-runs __post_init__, which rebuilds the mapping from the fields, and an
+    # entry that no field describes would be dropped without a word. A future
+    # correction goes above this one for the same reason.
+    #
+    # StatsEvent (via stats.clean, above) and MowerStatsEvent (here) are two
+    # independent keys in that mapping, each carrying its own GetStatsMower.
+    # Both are first-subscribed early — StatsEvent by Device.__init__ itself,
+    # MowerStatsEvent by the progress sensor — so an unavailable->available
+    # flap, which refreshes every registered event type, sends two identical
+    # getStats requests instead of one. Accepted: deduping identical commands
+    # across event types would mean changing the event bus itself, and the
+    # cost is one extra request on a rare transition, not a wrong answer.
+    #
+    # LifeSpanEvent and MowerBeaconsEvent share the same pattern for the same
+    # getLifeSpan command: LifeSpanEvent is first-subscribed by the blade
+    # sensor, MowerBeaconsEvent by the beacon platform setup in sensor.py, so
+    # every mower — beacon-equipped or not — asks twice at startup and on
+    # every reconnect. Both parse the one answer correctly; only the extra
+    # round trip is paid.
     events = {
         **patched._events,
         MowerProtectStateEvent: [GetProtectState()],
@@ -155,8 +250,11 @@ async def patch_device_info(class_: str) -> None:
         MowerMapInfoEvent: [GetMapInfoV2()],
     }
     if area_parameters:
+        # One area event represents the whole area capability. The two protocol
+        # reads populate one authoritative raw snapshot before notifying it.
         events[MowerAreaEvent] = [GetAreaParameter(), GetAreaSet()]
 
     object.__setattr__(patched, "_events", MappingProxyType(events))
+
     _DEVICES[class_] = replace(base, capabilities=patched)
     _LOGGER.debug("Patched capabilities for %s", class_)
