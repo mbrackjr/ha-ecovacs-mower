@@ -119,23 +119,6 @@ def reset() -> None:
     _AREA_STATE.clear()
 
 
-# Compatibility for existing imports while the command ownership moves to
-# ``commands.py``. New code should import the commands from that module; the
-# lazy lookup avoids a circular import because ``commands.py`` imports the area
-# state helpers above.
-def __getattr__(name: str) -> Any:
-    """Resolve area commands for legacy imports without owning their classes."""
-    if name in {"GetAreaParameter", "GetAreaSet", "SetAreaParameter"}:
-        from .commands import GetAreaParameter, GetAreaSet, SetAreaParameter
-
-        return {
-            "GetAreaParameter": GetAreaParameter,
-            "GetAreaSet": GetAreaSet,
-            "SetAreaParameter": SetAreaParameter,
-        }[name]
-    raise AttributeError(name)
-
-
 __all__ = [
     "MowerArea",
     "MowerAreaEvent",
