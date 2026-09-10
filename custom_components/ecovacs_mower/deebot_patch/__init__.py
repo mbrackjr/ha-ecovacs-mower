@@ -17,9 +17,16 @@ from deebot_client.hardware import _DEVICES
 from deebot_client.messages.json import MESSAGES
 
 from .areas import MowerAreaEvent
-from .area_commands import GetAreaParameter, GetAreaSet, SetAreaParameter
 from .authentication import AccountAuthenticator
-from .commands import CleanMower, GetCleanInfoMower, MowerStateRefresh, has_family
+from .commands import (
+    CleanMower,
+    GetAreaParameter,
+    GetAreaSet,
+    GetCleanInfoMower,
+    MowerStateRefresh,
+    SetAreaParameter,
+    has_family,
+)
 from .families import attempted_family_name
 from .hardware import SUPPORTED_CLASSES, ZONE_AREA_CLASSES, patch_device_info, profile_for_class
 from .map_messages import OnArI, OnMapInfo, OnMapTrace, OnMapTrack, OnMI, OnSpecialContour
@@ -45,14 +52,6 @@ from .messages import (
 from .state_precedence import register as register_mower_bus
 from .zonal import MowArea
 
-# Preserve the historical import surface while keeping the area command
-# implementation isolated from the larger command module.
-from . import commands as _commands
-
-_commands.GetAreaParameter = GetAreaParameter
-_commands.GetAreaSet = GetAreaSet
-_commands.SetAreaParameter = SetAreaParameter
-
 __all__ = [
     "SUPPORTED_CLASSES",
     "AccountAuthenticator",
@@ -63,6 +62,7 @@ __all__ = [
     "MowerAreaEvent",
     "MowerStateRefresh",
     "PatchContractError",
+    "SetAreaParameter",
     "apply",
     "attempted_family_name",
     "has_family",
