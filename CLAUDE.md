@@ -32,6 +32,8 @@ CI also runs hassfest and HACS validation (`.github/workflows/hassfest.yml`). Th
 
 Releases are cut by `.github/workflows/release.yml`, which runs after the test suite succeeds on `master`: if the version in `manifest.json` has no matching `v<version>` tag, it creates the tag and publishes a release with generated notes. A push whose version is already tagged is a no-op, so the bump commit is what triggers a release — never a hand-made tag.
 
+Cutting a release is therefore three steps, and the bump is the one commit that goes straight onto `master` without a PR — the maintainer pushes it with the admin bypass, the way every bump so far has landed: (1) list what has merged since the last tag with `git log v<last>..origin/master --merges` and pick the level from it — a `feat:` in there means a minor bump, only fixes means a patch; (2) change `version` in `manifest.json`, the only place the version lives, in a commit titled `chore: bump to <version>` with nothing else in it; (3) push and watch the `Release` run on `master` produce the `v<version>` tag. Anything else that should ship in the release — docs included — must be on `master` before the bump commit, since the generated notes cover exactly the commits between the two tags.
+
 ## Architecture
 
 ### The patch layer is the only connection to deebot-client's internals
