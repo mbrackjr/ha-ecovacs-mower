@@ -116,13 +116,19 @@ def _border_command(device: Device) -> Command:
     The id is learned from the map messages' envelopes (state_precedence), and
     on the one class that has this button the mower answers getMapInfo_V2
     within seconds of setup, so an unknown id is the rare case. Asking for
-    that refresh here makes the failure heal itself: the next press works.
+    that refresh here makes the failure heal itself: the next press works —
+    unless map setup itself failed (see controller._setup_map), in which case
+    there is no MowerMapInfoEvent subscriber, the refresh is a no-op, and
+    every press keeps answering the same way; the controller's warning log
+    is the only sign of that. request_refresh() is untested here because the
+    tests mock device.events rather than a live EventBus.
     """
     map_id = map_id_for(device.events)
     if map_id is None:
         device.events.request_refresh(MowerMapInfoEvent)
         raise HomeAssistantError(
-            "The mower has not reported its map yet; try again in a moment"
+            "The mower has not reported its map yet; try again in a moment. "
+            "If this persists, check the log for a map setup failure."
         )
     return MowBorder(map_id)
 
