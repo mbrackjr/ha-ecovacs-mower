@@ -12,7 +12,6 @@ from typing import Any
 
 from deebot_client.commands.json.custom import CustomCommand
 from deebot_client.message import HandlingResult
-from deebot_client.rs.util import decompress_base64_data
 
 from .areas import MowerArea, _AreaSetFragmentBuffer, _areas_for, _as_int, _notify
 

@@ -20,7 +20,6 @@ from .areas import MowerAreaEvent
 from .area_commands import GetAreaParameter, GetAreaSet, SetAreaParameter
 from .authentication import AccountAuthenticator
 from .commands import CleanMower, GetCleanInfoMower, MowerStateRefresh, has_family
-from .commands import GetChargeStateMower, GetLifeSpanMower, GetRainDelay, GetStatsMower, SetRainDelay
 from .families import attempted_family_name
 from .hardware import SUPPORTED_CLASSES, ZONE_AREA_CLASSES, patch_device_info, profile_for_class
 from .map_messages import OnArI, OnMapInfo, OnMapTrace, OnMapTrack, OnMI, OnSpecialContour
@@ -46,11 +45,9 @@ from .messages import (
 from .state_precedence import register as register_mower_bus
 from .zonal import MowArea
 
-# Keep the legacy command-module import surface while the area commands live in
-# their own module. This lets older tests and downstream imports continue to use
-# ``deebot_patch.commands.SetAreaParameter`` without coupling that module to the
-# area-state implementation.
-import custom_components.ecovacs_mower.deebot_patch.commands as _commands
+# Preserve the historical import surface while keeping the area command
+# implementation isolated from the larger command module.
+from . import commands as _commands
 
 _commands.GetAreaParameter = GetAreaParameter
 _commands.GetAreaSet = GetAreaSet
