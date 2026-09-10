@@ -15,8 +15,9 @@ from custom_components.ecovacs_mower.deebot_patch.zonal import (
     _ZoneCleanV2,
 )
 from custom_components.ecovacs_mower.deebot_patch.families import Family, selected
+from custom_components.ecovacs_mower.deebot_patch.state_precedence import register
 
-from .test_commands import _DEVICE_INFO, _OK, _NO_ANSWER, _transport
+from .test_commands import _DEVICE_INFO, _OK, _NO_ANSWER, _bus, _transport
 
 
 @pytest.fixture(autouse=True)
@@ -109,3 +110,35 @@ async def test_mow_area_falls_back_to_v2_and_commits_family() -> None:
 def test_mow_area_keeps_clean_contract() -> None:
     assert issubclass(MowArea, Clean)
     assert MowArea.NAME == "clean"
+
+
+async def test_mow_area_writes_spot_area_into_the_record_before_first_push() -> None:
+    # Closes the window between pressing start and onCleanInfo arriving: a
+    # quick pause in between must not echo a stale type from a prior job.
+    bus = _bus()
+    record = register(bus)
+    record.note_job({"type": "auto"})
+    fake, _sent = _transport(_OK)
+    command = MowArea(CleanMode.SPOT_AREA, [1, 3])
+
+    with patch.object(Command, "_execute", fake):
+        await command._execute(AsyncMock(), _DEVICE_INFO, bus)
+
+    assert record.job_type == "spotArea"
+
+
+def test_zone_delegates_are_built_on_the_shared_task_builder() -> None:
+    # The border command (issue #12) sends the same nested shape with another
+    # type string; one builder keeps the two from drifting apart.
+    from custom_components.ecovacs_mower.deebot_patch.commands import (
+        _NoActionRewrite,
+        _TaskClean,
+    )
+
+    assert issubclass(_ZoneCleanNonV2, _TaskClean)
+    assert issubclass(_ZoneCleanV2, _TaskClean)
+    # The builder must still bypass Clean._execute's start/resume rewrite: the
+    # bypass only works when _NoActionRewrite comes before Clean in the MRO.
+    for delegate, topic_base in ((_ZoneCleanNonV2, Clean), (_ZoneCleanV2, CleanV2)):
+        mro = delegate.__mro__
+        assert mro.index(_NoActionRewrite) < mro.index(topic_base)

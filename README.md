@@ -34,30 +34,57 @@ responds to start / pause / dock.
 
 ## Why a separate integration, instead of a fix upstream
 
-The underlying library, `deebot-client`, currently has eight open pull
+The underlying library, `deebot-client`, has around twenty open pull
 requests touching GOAT/mower support, the oldest opened in April. None have
-merged. In the same period, vacuum and authentication changes to the same
-library have merged within days. Two Home Assistant core pull requests
-adding mower features were auto-closed as stale by the triage bot while
-waiting on those library PRs to land.
+merged, and no release since 18.5.1 (30 July) contains any mower work. In
+the same period, vacuum and authentication changes to the same library have
+merged within days. Two Home Assistant core pull requests adding mower
+features were auto-closed as stale by the triage bot while waiting on those
+library PRs to land.
+
+In August the maintainer explained what blocks the `CleanMower` fix: the
+library keys its command lookup on the command name alone, so two devices
+cannot answer differently to the same name until that lookup is made
+per-device. A refactor doing exactly that has been open since 21 August,
+without a review.
 
 This is not a criticism of the maintainers — they're volunteers, and review
 bandwidth is finite. It's the reason a fork is the pragmatic way to get a
 working mower today rather than waiting on a queue with no visible movement.
 
-Relevant links, so you can check the state of things yourself:
+Relevant links, so you can check the state of things yourself. The status
+in brackets is as of 10 September 2026:
 
-- [DeebotUniverse/client.py#1624](https://github.com/DeebotUniverse/client.py/pull/1624) — fixes the `clean_V2` command (open)
-- [DeebotUniverse/client.py#1647](https://github.com/DeebotUniverse/client.py/pull/1647) — adds the two missing message handlers (open, community-approved, no maintainer response)
-- [DeebotUniverse/client.py#1650](https://github.com/DeebotUniverse/client.py/issues/1650) — `getCleanInfo_V2` not answered by GOAT hardware
-- [DeebotUniverse/client.py#1587](https://github.com/DeebotUniverse/client.py/pull/1587) — RTK support
-- [home-assistant/core#168621](https://github.com/home-assistant/core/issues/168621) — the user-facing symptom report this integration exists to fix
-- [home-assistant/core#169723](https://github.com/home-assistant/core/issues/169723) — mowers exposed with vacuum terminology
-- [DeebotUniverse/client.py#1743](https://github.com/DeebotUniverse/client.py/pull/1743) — password-free session renewal, the fix for the verification loop (open)
-- [home-assistant/core#178558](https://github.com/home-assistant/core/pull/178558) — the core side of that fix, blocked on the library release (open)
+- [DeebotUniverse/client.py#1624](https://github.com/DeebotUniverse/client.py/pull/1624) — fixes the `clean_V2` command (open; the maintainer's reply names the per-device command lookup as the prerequisite)
+- [DeebotUniverse/client.py#1772](https://github.com/DeebotUniverse/client.py/pull/1772) — that per-device command lookup (open, unreviewed)
+- [DeebotUniverse/client.py#1647](https://github.com/DeebotUniverse/client.py/pull/1647) — adds the two missing message handlers (closed by this integration's author on 29 August, after months as community-approved with no maintainer response; the handlers live here instead)
+- [DeebotUniverse/client.py#1650](https://github.com/DeebotUniverse/client.py/issues/1650) — `getCleanInfo_V2` not answered by GOAT hardware (open)
+- [DeebotUniverse/client.py#1587](https://github.com/DeebotUniverse/client.py/pull/1587) — RTK support (open, the author's July ping unanswered)
+- [home-assistant/core#168621](https://github.com/home-assistant/core/issues/168621) — the user-facing symptom report this integration exists to fix (open)
+- [home-assistant/core#169723](https://github.com/home-assistant/core/issues/169723) — mowers exposed with vacuum terminology (open)
+- [DeebotUniverse/client.py#1743](https://github.com/DeebotUniverse/client.py/pull/1743) — password-free session renewal, the fix for the verification loop (open). One thing its thread turned up: the renewed session is only accepted from the same `device_id` that was verified, so the id has to survive restarts. This integration keeps it in the config entry, so it survives restarts.
+- [home-assistant/core#178558](https://github.com/home-assistant/core/pull/178558) — the core side of that fix, blocked on the library release (open, no review)
 
 This integration does not depend on any of those merging. If they do,
 the corresponding patch in this repo becomes dead code and gets deleted.
+
+### Protocol work upstream that this integration does not have yet
+
+Since August one contributor has opened a series of pull requests against
+`deebot-client` built on traffic captured from a GOAT O1200 LiDAR Pro, the
+class this integration was developed on. Those have not merged either, so
+none of it can arrive as a library update, but the captured request and
+response shapes are a ready map of what could be built here next without
+sniffing the traffic again. Much of it already exists in this integration —
+the mowing-progress sensor, the rain-delay switch and number, the volume
+number and the map decoding all cover the same ground — and what remains is:
+
+- [DeebotUniverse/client.py#1774](https://github.com/DeebotUniverse/client.py/pull/1774) — the names of the saved mowing areas, from `getAreaSet` with `type: "ar"`. The `mow_area` service here takes area ids only.
+- [DeebotUniverse/client.py#1778](https://github.com/DeebotUniverse/client.py/pull/1778) — the remaining global settings as settable values: animal protection with its schedule, AI recognition, smart mowing with avoidance, narrow-passage adaptation and the lifted-alarm volume. Only the read-only protection flags exist here, as binary sensors.
+- [DeebotUniverse/client.py#1767](https://github.com/DeebotUniverse/client.py/pull/1767) and [#1768](https://github.com/DeebotUniverse/client.py/pull/1768) — per-area cutting height, cut mode, obstacle height and angle via `setAreaParameter`/`onAreaParameter`.
+
+If one of these matters to you, open an issue and say so — that is how the
+order of work here gets decided.
 
 ## Requirements
 
@@ -81,7 +108,7 @@ merely that the class string was seen:
 | **Ecovacs GOAT O1200 LiDAR Pro** | `2i0fns` | the author's own hardware |
 | **Ecovacs GOAT O800 RTK** | `9bts2s` | a user, firmware 1.13.8 ([#8](https://github.com/nord-/ha-ecovacs-mower/issues/8)) |
 | **Ecovacs GOAT O800 RTK** | `2px96q` | a user, controls and state confirmed — start/pause in [#24](https://github.com/nord-/ha-ecovacs-mower/issues/24), state on firmware 1.17.11 in [#56](https://github.com/nord-/ha-ecovacs-mower/issues/56). Firmware 1.17 speaks a second map dialect, decoded from two users' logs but not yet confirmed on hardware ([#41](https://github.com/nord-/ha-ecovacs-mower/issues/41)) |
-| **Ecovacs GOAT G1-800** | `77atlz` | patched, controls **not** confirmed — the protection-flag sensors work on firmware 1.36.208 ([#30](https://github.com/nord-/ha-ecovacs-mower/issues/30)); that firmware branch answers the `V2` command family instead of the one every other confirmed mower uses, and the integration now detects and switches to it automatically, so no manual configuration is needed ([#42](https://github.com/nord-/ha-ecovacs-mower/issues/42)) |
+| **Ecovacs GOAT G1-800** | `77atlz` | a user, firmware 1.36.208 — the protection-flag sensors in [#30](https://github.com/nord-/ha-ecovacs-mower/issues/30), start/pause/resume/dock from the `lawn_mower` entity in [#74](https://github.com/nord-/ha-ecovacs-mower/issues/74). That firmware branch answers the `V2` command family instead of the one every other confirmed mower uses, and the integration detects and switches to it automatically, so no manual configuration is needed ([#42](https://github.com/nord-/ha-ecovacs-mower/issues/42)); border mowing is built for this class from the request captured in [#12](https://github.com/nord-/ha-ecovacs-mower/issues/12) and awaits confirmation on hardware |
 | **Ecovacs GOAT A1600 LiDAR Pro** | `e4gqia` | a user, firmware 1.11.31 ([#29](https://github.com/nord-/ha-ecovacs-mower/pull/29)) — zone mowing confirmed ([#78](https://github.com/nord-/ha-ecovacs-mower/pull/78)) |
 | **Ecovacs GOAT A1600 RTK** | `xmp9ds` | reported, patch not yet confirmed — firmware 1.17.9 ([#43](https://github.com/nord-/ha-ecovacs-mower/issues/43)) |
 
@@ -164,8 +191,9 @@ stored, and the entry stops asking. There is no need to delete and re-add it.
 
 ## What you get
 
-Forty-two entities on the mower's device page, across eight platforms —
-plus one per UWB beacon on the models that use them:
+Forty-three entities on the mower's device page, across eight platforms —
+forty-four on the G1-800, which alone gets the "Mow border" button — plus
+one per UWB beacon on the models that use them:
 
 | Platform | Count | What |
 |---|---|---|
@@ -174,7 +202,7 @@ plus one per UWB beacon on the models that use them:
 | `binary_sensor` | 6 | Fault — a latched problem that stays on until the mower recovers or you clear it (see below) — plus rain sensor, rain delay, emergency stop, locked, animal protection: the mower's raw protection flags, from the `onProtectState` message the library drops (see below) |
 | `switch` | 8 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection, rain detection (see below) |
 | `number` | 3 | Notification volume, cutting direction, rain delay duration (see below) |
-| `button` | 6 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), and "Clear fault" (releases the latched fault; see below) |
+| `button` | 7, 8 on the G1-800 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), "Clear fault" (releases the latched fault; see below), "End mowing task" (ends the current job for good; see below) and, on the G1-800, "Mow border" (starts a border job; see below) |
 | `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped — see below) |
 | `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, `onMapTrace` on firmware 1.17, and `onMapInfo_V2` on 1.36 — that last one only ever arrives in answer to a `getMapInfo_V2` the integration now sends); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
 
@@ -208,11 +236,67 @@ it sends the requested zones directly to the targeted mower and does not
 attempt to determine whether the specified zones actually exist on the
 mower.
 
+Once a zone job is running, *Pause*, *Start* (which resumes it) and **End
+mowing task** work on it like on any other job. The mower insists on being
+told which kind of job it is in: a resume that names the wrong kind is
+acknowledged and ignored, observed on an O1200 LiDAR
+([#94](https://github.com/nord-/ha-ecovacs-mower/issues/94)). The integration
+therefore remembers the kind of job the mower last reported and names it on
+those three commands, so a zone job started from the app or from this
+service can be paused and resumed from Home Assistant alike.
+
 The same service can also be used from Home Assistant's UI, where the mower
 entity and one or more zone IDs can be selected.
 
 The zone IDs are mower-specific. A value being within the accepted 0..999
 range does not imply that the mower has a zone with that ID.
+
+### Border mowing
+
+The *Edge cutting* switch is a setting: it decides whether an ordinary job
+also trims the perimeter. Border mowing is a separate task the mower runs on
+its own, and the **Mow border** button starts one — the same job the Ecovacs
+app starts from its border-mowing action. While it runs the mower reports
+`mowing`, the progress sensor tracks the strip along the boundary rather than
+the lawn, and the map keeps updating.
+
+The button exists only on classes where the request the app sends has been
+captured, which today is the GOAT G1-800 (`77atlz`). If you have another
+mower and would like the button, open an issue with a debug log of the app
+starting a border job; the request shape and the device class are what it
+needs.
+
+The command names the mower's current map, which the integration learns from
+the map messages the mower sends. Right after a restart that can take a few
+seconds; pressing the button before then answers "The mower has not reported
+its map yet; try again in a moment" and asks the mower for its map, so the
+next press works.
+
+### Ending a task
+
+Sending the mower back to its dock does not end the job. The mower keeps it
+as resumable — the app shows the unfinished progress with *End* and
+*Continue* — and a later *Start* resumes it instead of beginning a fresh
+cycle. The **End mowing task** button is the app's *End*: it ends the
+current job for good, so the next start is a new one. Useful in automations
+that interrupt a job during the day and want tomorrow's run to start from
+scratch.
+
+Ending a job does not bring the mower home. It stops where it is and stays
+there, exactly as the app's *End* does — observed on an O1200 LiDAR
+(`2i0fns`), where the mower went `idle` on the lawn and no return-to-dock
+followed. The `lawn_mower` entity shows `paused` for a mower standing idle
+off the dock, which is correct but easy to misread as "resumable". An
+automation that wants the mower parked as well needs both actions, in
+either order: **End mowing task** and then *Return to base*, or *Return to
+base* first — the job stays resumable on the way home — and **End mowing
+task** once it is docked.
+
+The payload is confirmed on the G1-800 (`77atlz`), where the app's own
+request was captured ([#51](https://github.com/nord-/ha-ecovacs-mower/issues/51)).
+On the O-series and A-series mowers it sends the same shape those mowers
+already accept for *Pause*; if it does nothing on yours, a debug log of the
+app's *End* on that mower is what settles it.
 
 ### When a run stops because of rain
 
@@ -510,7 +594,7 @@ a bug: if one of these looks blank or "unavailable," this is why.
 | `switch` | 7 of 7 | all of them: advanced mode, TrueDetect, edge cutting, child lock, lift warning, boundary crossing warning, safety protection |
 | `number` | 2 of 2 | both: volume, cutting direction |
 | `sensor` | 4 of the 16 fixed ones | IP address, Wi-Fi signal strength, Wi-Fi network name, and **error code**. The per-beacon sensors are enabled |
-| `button` | 4 of 6 | the four consumable-lifespan resets (blade, lens brush, trimmer brush, weed rope) — "Locate mower" and "Clear fault" are enabled by default |
+| `button` | 4 of 7 (4 of 8 on the G1-800) | the four consumable-lifespan resets (blade, lens brush, trimmer brush, weed rope) — "Locate mower", "Clear fault", "End mowing task" and, on the G1-800, "Mow border" are enabled by default |
 
 **If you're planning anything on the error sensor** — an alarm, a
 notification, a dashboard card — note that it does not exist as an

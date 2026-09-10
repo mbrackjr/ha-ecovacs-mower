@@ -59,6 +59,8 @@
     },
     "button": {
       "clear_fault": { "name": "Clear fault" },
+      "end_task": { "name": "End mowing task" },
+      "mow_border": { "name": "Mow border" },
       "play_sound": { "name": "Locate mower" },
       "reset_lifespan_blade": { "name": "Reset blades" },
       "reset_lifespan_lens_brush": { "name": "Reset lens brush" },

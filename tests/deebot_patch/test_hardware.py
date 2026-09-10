@@ -506,3 +506,13 @@ async def test_patch_preserves_the_other_life_span_capabilities(class_: str) -> 
     assert after.capabilities.life_span.types == types_before
     assert after.capabilities.life_span.reset is reset_before
     assert after.capabilities.life_span.event is event_before
+
+
+def test_border_classes_are_the_ones_with_a_captured_request() -> None:
+    # Membership means "the border request shape is confirmed on this class",
+    # not "we patch it" — the opposite sense from SUPPORTED_CLASSES, the same
+    # sense as ZONE_AREA_CLASSES. Only the G1-800 has a capture (issue #12).
+    from custom_components.ecovacs_mower.deebot_patch.hardware import BORDER_CLASSES
+
+    assert set(BORDER_CLASSES) == {G1_800}
+    assert set(BORDER_CLASSES) <= set(SUPPORTED_CLASSES)

@@ -8,8 +8,11 @@ clean_V2" and makes start and pause do nothing.
 ``CleanMower`` inherits ``Clean`` (topic ``clean``) but sends a V2-formatted
 payload, which is what Ecovacs' own app does.
 
-Corresponds to DeebotUniverse/client.py PR #1624, without its caching of the
-active clean type — that is only needed for customArea, which is out of scope.
+Corresponds to DeebotUniverse/client.py PR #1624. The active clean type it
+caches is kept here too, on the per-device record in ``state_precedence.py``
+rather than on the command: pause, resume and stop have to name the running
+job's type, and a resume with ``auto`` against a paused ``spotArea`` job is
+acknowledged and ignored (issue #94).
 
 ``GetCleanInfoMower`` fixes an answer rather than a request: ``getCleanInfo`` is
 sent and answered, and the answer is a constant ``idle`` whatever the mower is
@@ -262,9 +265,9 @@ class _AdaptiveFamily:
 
 
 def has_family(command: Command) -> bool:
-    """Whether *command* is one of the two whose wire format depends on the
-    mower's dialect (issue #42) — the only commands ``family_name()`` means
-    anything for.
+    """Whether *command* is one of the commands whose wire format depends on the
+    mower's dialect (issue #42) — CleanMower, GetCleanInfoMower, MowArea and
+    MowBorder today — the only commands ``family_name()`` means anything for.
 
     Used by ``entity.py`` to decide whether to name the family in the
     unconfirmed-command warning: doing so unconditionally would print it next
@@ -303,11 +306,47 @@ class _NoActionRewrite:
         return await Command._execute(self, authenticator, device_info, event_bus)
 
 
-class _CleanNonV2(_NoActionRewrite, Clean):
-    """Mow on the ``clean`` topic with a V2 payload, as the app does."""
+class _TaskClean(_NoActionRewrite):
+    """A ``start`` for one named task type, on whichever topic the subclass adds.
+
+    ``spotArea`` (issue #11) and ``border`` (issue #12) share the shape
+    ``{"act": "start", "content": {"type": <task>, "value": <argument>}}``
+    and differ only in the two strings. One builder keeps them identical the
+    day the firmware wants a third field, and keeps the action-rewrite bypass
+    in one place. Not sendable on its own: a concrete subclass mixes in
+    ``Clean`` or ``CleanV2`` to supply ``NAME`` and the topic.
+    """
+
+    def __init__(self, task: str, value: str) -> None:
+        self._task = task
+        self._value = value
+        super().__init__(CleanAction.START)
 
     def _get_args(self, action: CleanAction) -> dict[str, Any]:
-        return {"act": action.value, "content": {"type": CleanMode.AUTO.value}}
+        return {
+            "act": action.value,
+            "content": {"type": self._task, "value": self._value},
+        }
+
+
+class _CleanNonV2(_NoActionRewrite, Clean):
+    """Mow on the ``clean`` topic with a V2 payload, as the app does.
+
+    *job_type* is what goes in ``content.type``: the running job's type for
+    pause, resume and stop (issue #94), ``auto`` for a start. The app carries
+    the job's own type on all three — captured on an O1200 as ``spotArea`` on
+    resume and stop after an area start — and a resume with ``auto`` against a
+    paused ``spotArea`` job is acknowledged and ignored.
+    """
+
+    def __init__(
+        self, action: CleanAction, job_type: str = CleanMode.AUTO.value
+    ) -> None:
+        self._job_type = job_type
+        super().__init__(action)
+
+    def _get_args(self, action: CleanAction) -> dict[str, Any]:
+        return {"act": action.value, "content": {"type": self._job_type}}
 
 
 class _CleanV2Mower(_NoActionRewrite, CleanV2):
@@ -364,11 +403,35 @@ class CleanMower(_AdaptiveFamily, Clean):
     ) -> tuple[HandlingResult, dict[str, Any]]:
         """Decide the action, then send it on the family that answers."""
         action = self._effective_action(event_bus)
+        job_type = self._job_type(action, event_bus)
+        record = record_for(event_bus)
+        if action is CleanAction.START and record is not None:
+            # Write what this command is about to start, not just what it
+            # sends: it closes the window between issuing a start and the
+            # first onCleanInfo push, where a quick pause would otherwise
+            # echo whatever the previous job left behind.
+            record.job_type = job_type
         self._delegates = {
-            Family.NON_V2: _CleanNonV2(action),
+            Family.NON_V2: _CleanNonV2(action, job_type),
             Family.V2: _CleanV2Mower(action),
         }
         return await super()._execute(authenticator, device_info, event_bus)
+
+    @staticmethod
+    def _job_type(action: CleanAction, event_bus: EventBus) -> str:
+        """The type to echo for *action* (issue #94).
+
+        A start is a new ``auto`` job whatever ran before. Pause, resume and
+        stop name the job the mower is in, as the handler recorded it from
+        ``onCleanInfo``; ``auto`` when nothing has been reported yet, which is
+        what was always sent and so no worse than before.
+        """
+        if action is CleanAction.START:
+            return CleanMode.AUTO.value
+        record = record_for(event_bus)
+        if record is None or record.job_type is None:
+            return CleanMode.AUTO.value
+        return record.job_type
 
     def _effective_action(self, event_bus: EventBus) -> CleanAction:
         """``START`` or ``RESUME``, from the state the mower is really in.

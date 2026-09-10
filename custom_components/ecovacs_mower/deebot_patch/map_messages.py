@@ -39,6 +39,7 @@ from .geometry import (
     parse_map_track,
     parse_special_contour,
 )
+from .state_precedence import record_for
 
 if TYPE_CHECKING:
     from deebot_client.event_bus import EventBus
@@ -108,6 +109,15 @@ class _MapMessage(MessageBodyDataDict, ABC):
     def _handle_body_data_dict(
         cls, event_bus: EventBus, data: dict[str, Any]
     ) -> HandlingResult:
+        # Every map message names the map in its envelope, and a border job
+        # has to name it back (issue #12). Recorded here, ahead of the fragment
+        # buffering, so the first fragment teaches it and a blob that never
+        # completes or never decodes still does. "using" goes along so a
+        # stored-but-inactive map is not mistaken for the current one. Only
+        # for a registered bus: an ordinary vacuum on the same account reaches
+        # this handler too.
+        if (record := record_for(event_bus)) is not None:
+            record.note_map(data.get("mid"), data.get("using"))
         info = data.get("info")
         if not info:
             return HandlingResult.analyse()

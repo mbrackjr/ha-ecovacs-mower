@@ -78,6 +78,7 @@ def test_no_stale_button_translations_or_icons() -> None:
     from custom_components.ecovacs_mower.button import (
         ENTITY_DESCRIPTIONS,
         LIFESPAN_ENTITY_DESCRIPTIONS,
+        MOWER_COMMAND_DESCRIPTIONS,
         EcovacsClearFaultButtonEntity,
     )
 
@@ -87,7 +88,11 @@ def test_no_stale_button_translations_or_icons() -> None:
 
     keys = {
         d.translation_key
-        for d in (*ENTITY_DESCRIPTIONS, *LIFESPAN_ENTITY_DESCRIPTIONS)
+        for d in (
+            *ENTITY_DESCRIPTIONS,
+            *LIFESPAN_ENTITY_DESCRIPTIONS,
+            *MOWER_COMMAND_DESCRIPTIONS,
+        )
     } | {EcovacsClearFaultButtonEntity.entity_description.translation_key}
     assert set(strings["entity"]["button"]) <= keys
     assert set(icons["entity"]["button"]) <= keys
@@ -137,3 +142,149 @@ def test_the_clear_fault_button_stays_available_when_the_mower_is_not() -> None:
     from custom_components.ecovacs_mower.button import EcovacsClearFaultButtonEntity
 
     assert EcovacsClearFaultButtonEntity._always_available is True
+
+
+def test_the_mower_command_buttons_are_border_and_end_task() -> None:
+    from custom_components.ecovacs_mower.button import MOWER_COMMAND_DESCRIPTIONS
+
+    assert {d.key for d in MOWER_COMMAND_DESCRIPTIONS} == {"mow_border", "end_task"}
+
+
+def test_the_border_button_is_limited_to_the_classes_with_a_capture() -> None:
+    from custom_components.ecovacs_mower.button import MOWER_COMMAND_DESCRIPTIONS
+    from custom_components.ecovacs_mower.deebot_patch.hardware import BORDER_CLASSES
+
+    by_key = {d.key: d for d in MOWER_COMMAND_DESCRIPTIONS}
+    assert by_key["mow_border"].classes == BORDER_CLASSES
+    assert by_key["mow_border"].starts_job is True
+    # Every supported mower: the V2 stop is captured, the non-V2 one is the
+    # shape pause already uses, and the #51 reporter has non-V2 hardware.
+    assert by_key["end_task"].classes is None
+    assert by_key["end_task"].starts_job is False
+
+
+def test_mower_command_buttons_have_translations_and_icons() -> None:
+    import json
+    from pathlib import Path
+
+    from custom_components.ecovacs_mower.button import MOWER_COMMAND_DESCRIPTIONS
+
+    root = Path(__file__).parent.parent / "custom_components" / "ecovacs_mower"
+    strings = json.loads((root / "strings.json").read_text(encoding="utf-8"))
+    icons = json.loads((root / "icons.json").read_text(encoding="utf-8"))
+
+    for description in MOWER_COMMAND_DESCRIPTIONS:
+        assert description.translation_key in strings["entity"]["button"]
+        assert description.translation_key in icons["entity"]["button"]
+
+
+async def test_the_border_button_sends_the_recorded_map_id_and_restarts_polling() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from custom_components.ecovacs_mower.button import (
+        MOWER_COMMAND_DESCRIPTIONS,
+        EcovacsMowerCommandButtonEntity,
+    )
+    from custom_components.ecovacs_mower.deebot_patch.border import MowBorder
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import register
+
+    description = next(d for d in MOWER_COMMAND_DESCRIPTIONS if d.key == "mow_border")
+    device = MagicMock()
+    device.device_info = {"did": "test-did", "class": "77atlz"}
+    register(device.events).note_map("2049987783")
+    controller = MagicMock()
+    entity = EcovacsMowerCommandButtonEntity(device, controller, description)
+    entity._execute_command = AsyncMock()
+
+    await entity.async_press()
+
+    controller.start_polling.assert_called_once_with(device)
+    entity._execute_command.assert_awaited_once_with(MowBorder("2049987783"))
+
+
+async def test_the_border_button_asks_for_the_map_when_it_has_none() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    import pytest
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.ecovacs_mower.button import (
+        MOWER_COMMAND_DESCRIPTIONS,
+        EcovacsMowerCommandButtonEntity,
+    )
+    from custom_components.ecovacs_mower.deebot_patch.map_messages import (
+        MowerMapInfoEvent,
+    )
+    from custom_components.ecovacs_mower.deebot_patch.state_precedence import register
+
+    description = next(d for d in MOWER_COMMAND_DESCRIPTIONS if d.key == "mow_border")
+    device = MagicMock()
+    device.device_info = {"did": "test-did", "class": "77atlz"}
+    register(device.events)  # registered, but no map message has arrived
+    controller = MagicMock()
+    entity = EcovacsMowerCommandButtonEntity(device, controller, description)
+    entity._execute_command = AsyncMock()
+
+    with pytest.raises(HomeAssistantError, match="has not reported its map"):
+        await entity.async_press()
+
+    # Self-healing: the refresh is the getMapInfo_V2 that teaches the id.
+    device.events.request_refresh.assert_called_once_with(MowerMapInfoEvent)
+    entity._execute_command.assert_not_awaited()
+    controller.start_polling.assert_not_called()
+
+
+async def test_the_end_task_button_sends_stop_and_leaves_polling_alone() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from deebot_client.models import CleanAction
+
+    from custom_components.ecovacs_mower.button import (
+        MOWER_COMMAND_DESCRIPTIONS,
+        EcovacsMowerCommandButtonEntity,
+    )
+    from custom_components.ecovacs_mower.deebot_patch.commands import CleanMower
+
+    description = next(d for d in MOWER_COMMAND_DESCRIPTIONS if d.key == "end_task")
+    device = MagicMock()
+    device.device_info = {"did": "test-did", "class": "2px96q"}
+    controller = MagicMock()
+    entity = EcovacsMowerCommandButtonEntity(device, controller, description)
+    entity._execute_command = AsyncMock()
+
+    await entity.async_press()
+
+    entity._execute_command.assert_awaited_once_with(CleanMower(CleanAction.STOP))
+    # Ending a job is not a leaving-the-dock command, same as pause.
+    controller.start_polling.assert_not_called()
+
+
+def test_mower_command_buttons_are_built_per_class() -> None:
+    from unittest.mock import MagicMock
+
+    from deebot_client.capabilities import DeviceType
+
+    from custom_components.ecovacs_mower.button import _mower_command_entities
+
+    def mower(class_: str) -> MagicMock:
+        device = MagicMock()
+        device.device_info = {"did": f"did-{class_}", "class": class_}
+        device.capabilities.device_type = DeviceType.MOWER
+        return device
+
+    vacuum = MagicMock()
+    vacuum.device_info = {"did": "did-vac", "class": "yna5xi"}
+    vacuum.capabilities.device_type = DeviceType.VACUUM
+
+    controller = MagicMock()
+    controller.devices = [mower("77atlz"), mower("2px96q"), vacuum]
+
+    built = {
+        (e._device.device_info["class"], e.entity_description.key)
+        for e in _mower_command_entities(controller)
+    }
+    assert built == {
+        ("77atlz", "mow_border"),
+        ("77atlz", "end_task"),
+        ("2px96q", "end_task"),
+    }

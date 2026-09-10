@@ -31,6 +31,8 @@ from custom_components.ecovacs_mower.deebot_patch.messages import (
     OnChargeInfo,
     OnChargeState,
     OnCleanInfo,
+    OnMowAutoStart,
+    OnMowAutoStop,
     OnMowBorderStart,
     OnMowBorderStop,
     OnMowScheduleStart,
@@ -1108,6 +1110,65 @@ def test_the_border_job_edge_names_are_registered() -> None:
     assert MESSAGES["onFwBuryPoint-bd_task-mow-border-stop"] is OnMowBorderStop
 
 
+# auto-* from a GOAT G1-800 (77atlz, fw 1.36.208) on 2026-09-04, issue #74: a
+# job started from Home Assistant. The library's ``Clean`` sends
+# ``type: "auto"`` on a start, so this is the one job type the integration
+# itself starts — and it was the one without a handler. The stop speaks the
+# border dialect (``triggerType``, ``cuttedArea``) and adds ``pauseId``/
+# ``resumeId`` for the pause and resume the job went through. The report
+# listed ``triggerType``, ``cuttedArea``, ``workArea`` and the id fields
+# (``mowId``/``pauseId``/``resumeId``/``bid``/``sid``) and quoted the areas;
+# the ids are placeholders of the observed shape. ``index`` and ``ts`` were
+# not in the report — they are carried over from ``_BORDER_STOP``.
+_AUTO_STOP = {
+    "bid": "1011788091708000",
+    "index": "0000001204",
+    "mowId": "1788089834000000",
+    "pauseId": "1788091081000000",
+    "resumeId": "1788091088000000",
+    "sid": "2021788091708000",
+    "triggerType": "app",
+    "ts": "1788091708000",
+    "cuttedArea": 48.865,
+    "workArea": 137.675,
+}
+# The start was not quoted in the report. Modelled on the border start from
+# the same firmware, which is the other job type it announces in this dialect.
+_AUTO_START = {
+    "index": "0000001187",
+    "mapid": "2049987783",
+    "mowId": "1788089834000000",
+    "triggerType": "app",
+    "ts": "1788089834000",
+}
+
+
+def test_an_auto_stop_from_home_assistant_publishes_both_areas() -> None:
+    """A job the integration started ends on ``mow-auto-stop`` (issue #74)."""
+    (event,) = _notified_edges(OnMowAutoStop, _AUTO_STOP)
+
+    assert event.phase == "stop"
+    assert event.trigger == "app"
+    assert event.mowed_area == 48.865
+    assert event.work_area == 137.675
+
+
+def test_an_auto_start_is_a_start() -> None:
+    (event,) = _notified_edges(OnMowAutoStart, _AUTO_START)
+
+    assert event.phase == "start"
+    assert event.trigger == "app"
+    assert event.mowed_area is None
+    assert event.work_area is None
+
+
+def test_the_auto_job_edge_names_are_registered() -> None:
+    apply()
+
+    assert MESSAGES["onFwBuryPoint-bd_task-mow-auto-start"] is OnMowAutoStart
+    assert MESSAGES["onFwBuryPoint-bd_task-mow-auto-stop"] is OnMowAutoStop
+
+
 async def test_two_identical_starts_both_reach_the_subscriber() -> None:
     """_seq, not defensiveness: two reborn starts are byte-identical payloads.
 
@@ -1453,3 +1514,115 @@ def test_on_uwb_is_registered_by_apply() -> None:
     # (issue #40).
     apply()
     assert MESSAGES["onUWB"] is OnUwb
+
+
+# Issue #94: the handler remembers the type of the running job.
+
+
+async def test_clean_info_records_the_job_type() -> None:
+    bus = _bus()
+    record = register(bus)
+
+    handle_clean_info(
+        bus,
+        {
+            "trigger": "app",
+            "state": "clean",
+            "cleanState": {
+                "motionState": "working",
+                "cid": "122",
+                "content": {"type": "spotArea", "value": "2"},
+            },
+        },
+    )
+
+    assert record.job_type == "spotArea"
+
+
+async def test_a_paused_clean_info_records_the_job_type_too() -> None:
+    # The forced poll while the O1200 stood paused on the lawn answered this.
+    bus = _bus()
+    record = register(bus)
+
+    handle_clean_info(
+        bus,
+        {
+            "trigger": "app",
+            "state": "clean",
+            "cleanState": {"motionState": "pause", "content": {"type": "spotArea"}},
+        },
+    )
+
+    assert record.job_type == "spotArea"
+
+
+async def test_a_paused_clean_info_records_the_job_type_even_while_docked() -> None:
+    # The #67 gate withholds the StateEvent; it must not withhold the type.
+    bus = _bus()
+    record = register(bus)
+    record.dock()
+
+    handle_clean_info(
+        bus,
+        {
+            "state": "clean",
+            "cleanState": {"motionState": "pause", "content": {"type": "spotArea"}},
+        },
+    )
+
+    assert record.job_type == "spotArea"
+
+
+async def test_an_idle_push_without_clean_state_forgets_the_job_type() -> None:
+    # What the app's End produced on 2026-09-10: state idle, no cleanState.
+    bus = _bus()
+    record = register(bus)
+    record.note_job({"type": "spotArea"})
+
+    handle_clean_info(bus, {"trigger": "app", "other": "", "state": "idle"})
+
+    assert record.job_type is None
+
+
+async def test_a_clean_info_without_content_keeps_the_job_type() -> None:
+    # onScheduleTaskInfo shares this handler and carries no content.
+    bus = _bus()
+    record = register(bus)
+    record.note_job({"type": "spotArea"})
+
+    handle_clean_info(bus, {"state": "clean", "cleanState": {"motionState": "working"}})
+
+    assert record.job_type == "spotArea"
+
+
+async def test_a_null_clean_state_does_not_raise() -> None:
+    # A present-but-null cleanState is not covered by note_job's own dict
+    # guard, since data.get("cleanState", {}) only falls back on an absent
+    # key. Not observed on the wire; held to the same standard OnStatsMower
+    # holds itself to for a push no firmware is known to send.
+    bus = _bus()
+    record = register(bus)
+    record.note_job({"type": "spotArea"})
+
+    result = handle_clean_info(
+        bus, {"trigger": "alert", "state": "idle", "cleanState": None}
+    )
+
+    assert result.state is HandlingState.SUCCESS
+    assert record.job_type == "spotArea"
+
+
+async def test_a_vacuum_without_a_record_still_parses() -> None:
+    bus = _bus()
+    published = _collect(bus, StateEvent)
+
+    handle_clean_info(
+        bus,
+        {
+            "state": "clean",
+            "cleanState": {"motionState": "working", "content": {"type": "auto"}},
+        },
+    )
+    await asyncio.sleep(0)
+
+    assert [event.state for event in published] == [State.CLEANING]

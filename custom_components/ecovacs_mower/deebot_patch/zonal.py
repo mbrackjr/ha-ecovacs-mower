@@ -18,8 +18,9 @@ from deebot_client.commands.json.clean import Clean, CleanV2
 from deebot_client.message import HandlingResult
 from deebot_client.models import CleanAction, CleanMode
 
-from .commands import _AdaptiveFamily, _NoActionRewrite
+from .commands import _AdaptiveFamily, _TaskClean
 from .families import Family
+from .state_precedence import record_for
 
 if TYPE_CHECKING:
     from deebot_client.authentication import Authenticator
@@ -30,18 +31,11 @@ if TYPE_CHECKING:
 _TYPE_SPOT_AREA = "spotArea"
 
 
-class _ZoneClean(_NoActionRewrite):
-    """Shared spot-area payload and action-rewrite bypass."""
+class _ZoneClean(_TaskClean):
+    """The spot-area payload, before a topic is chosen."""
 
     def __init__(self, area: list[int | float]) -> None:
-        self._value = ",".join(str(value) for value in area)
-        super().__init__(CleanAction.START)
-
-    def _get_args(self, action: CleanAction) -> dict[str, Any]:
-        return {
-            "act": action.value,
-            "content": {"type": _TYPE_SPOT_AREA, "value": self._value},
-        }
+        super().__init__(_TYPE_SPOT_AREA, ",".join(str(value) for value in area))
 
 
 class _ZoneCleanNonV2(_ZoneClean, Clean):
@@ -93,6 +87,11 @@ class MowArea(_AdaptiveFamily, Clean):
         event_bus: EventBus,
     ) -> tuple[HandlingResult, dict[str, Any]]:
         """Build the two wire variants and let the adaptive family choose."""
+        # Written here, not just sent: closes the window between issuing a
+        # start and the first onCleanInfo push, where a quick pause would
+        # otherwise echo whatever the previous job left behind (issue #94).
+        if (record := record_for(event_bus)) is not None:
+            record.job_type = _TYPE_SPOT_AREA
         self._delegates = {
             Family.NON_V2: _ZoneCleanNonV2(self._area),
             Family.V2: _ZoneCleanV2(self._area),
