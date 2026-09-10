@@ -247,6 +247,17 @@ async def patch_device_info(class_: str) -> None:
         MowerRainDelayEvent: [GetRainDelay()],
         MowerStatsEvent: [GetStatsMower()],
         MowerBeaconsEvent: [GetLifeSpanMower(capabilities.life_span.types)],
+        # MowerMapInfoEvent is a different case from all of the above: it is not a
+        # push the mower may forget to send, it is a push the mower never sends
+        # unasked. Firmware 1.36 answers getMapInfo_V2 with the lawn outline on
+        # the atr topic and sends it at no other time, so without an entry here
+        # the boundary never arrives at all and the map stays a coverage patch
+        # with no field around it (issue #81). controller._setup_map subscribes
+        # MowerMapInfoEvent eagerly, so this alone gets the request sent at setup
+        # and again on every reconnect — no new lifecycle code, and no risk of a
+        # command firing before the device exists. The answer is an ack; the
+        # payload lands separately in OnMapInfo, which is why this refresh
+        # publishes no event of its own and why that is fine — see GetMapInfoV2.
         MowerMapInfoEvent: [GetMapInfoV2()],
     }
     if area_parameters:
