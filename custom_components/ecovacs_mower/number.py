@@ -31,17 +31,14 @@ from deebot_client.device import Device
 from deebot_client.events import CutDirectionEvent, VolumeEvent
 from deebot_client.events.base import Event
 
-from homeassistant.components.number import (
-    NumberEntity,
-    NumberEntityDescription,
-    NumberMode,
-)
+from homeassistant.components.number import NumberEntity, NumberEntityDescription, NumberMode
 from homeassistant.const import DEGREE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
+from .area_sensors import async_setup_area_sensors
 from .deebot_patch.commands import SetRainDelay
 from .deebot_patch.messages import MowerRainDelayEvent
 from .entity import (
@@ -108,6 +105,7 @@ async def async_setup_entry(
     )
     if entities:
         async_add_entities(entities)
+    await async_setup_area_sensors(config_entry, async_add_entities, number_platform=True)
 
 
 class EcovacsNumberEntity[EventT: Event](
@@ -171,8 +169,6 @@ class EcovacsRainDelayNumber(
     def __init__(self, device: Device) -> None:
         """Initialize entity."""
         super().__init__(device, device.capabilities)
-        # The toggle half of the same setting, held for the same reason the
-        # switch holds the delay — see ``async_set_native_value``.
         self._enabled: bool | None = None
 
     @override
@@ -189,17 +185,7 @@ class EcovacsRainDelayNumber(
 
     @override
     async def async_set_native_value(self, value: float) -> None:
-        """Send the new delay, with the sensor state the device last reported.
-
-        The mirror image of the switch: ``setRainDelay`` carries both fields, so
-        writing the duration alone would switch the rain sensor to whatever this
-        entity assumed. Refusing until the device has said is the only answer
-        that cannot silently disable it.
-
-        Requests a refresh afterwards for the same reason the switch does: the
-        device pushing ``onRainDelay`` on its own answer is unconfirmed, and
-        this is the cheap fallback if it does not.
-        """
+        """Send the new delay, with the sensor state the device last reported."""
         if self._enabled is None:
             raise HomeAssistantError(
                 "The mower has not reported whether its rain sensor is on, so "
