@@ -82,7 +82,7 @@ merely that the class string was seen:
 | **Ecovacs GOAT O800 RTK** | `9bts2s` | a user, firmware 1.13.8 ([#8](https://github.com/nord-/ha-ecovacs-mower/issues/8)) |
 | **Ecovacs GOAT O800 RTK** | `2px96q` | a user, controls and state confirmed — start/pause in [#24](https://github.com/nord-/ha-ecovacs-mower/issues/24), state on firmware 1.17.11 in [#56](https://github.com/nord-/ha-ecovacs-mower/issues/56). Firmware 1.17 speaks a second map dialect, decoded from two users' logs but not yet confirmed on hardware ([#41](https://github.com/nord-/ha-ecovacs-mower/issues/41)) |
 | **Ecovacs GOAT G1-800** | `77atlz` | patched, controls **not** confirmed — the protection-flag sensors work on firmware 1.36.208 ([#30](https://github.com/nord-/ha-ecovacs-mower/issues/30)); that firmware branch answers the `V2` command family instead of the one every other confirmed mower uses, and the integration now detects and switches to it automatically, so no manual configuration is needed ([#42](https://github.com/nord-/ha-ecovacs-mower/issues/42)) |
-| **Ecovacs GOAT A1600 LiDAR Pro** | `e4gqia` | a user, firmware 1.11.31 ([#29](https://github.com/nord-/ha-ecovacs-mower/pull/29)) |
+| **Ecovacs GOAT A1600 LiDAR Pro** | `e4gqia` | a user, firmware 1.11.31 ([#29](https://github.com/nord-/ha-ecovacs-mower/pull/29)) — zone mowing confirmed ([#78](https://github.com/nord-/ha-ecovacs-mower/pull/78)) |
 | **Ecovacs GOAT A1600 RTK** | `xmp9ds` | reported, patch not yet confirmed — firmware 1.17.9 ([#43](https://github.com/nord-/ha-ecovacs-mower/issues/43)) |
 
 The A1600 ships as two machines, and they report different device classes:
@@ -164,52 +164,55 @@ stored, and the entry stops asking. There is no need to delete and re-add it.
 
 ## What you get
 
-Forty-two fixed entities on the mower's device page, across eight platforms —
-plus one per UWB beacon on the models that use them and four per configured
-area on the A1600 LiDAR Pro:
+Forty-two entities on the mower's device page, across eight platforms —
+plus one per UWB beacon on the models that use them:
 
 | Platform | Count | What |
 |---|---|---|
 | `lawn_mower` | 1 | Real state (`mowing`, `paused`, `returning`, `docked`, `error`) that updates within seconds, plus working `start_mowing`, `pause`, and `dock` |
-| `sensor` | 16 + one per beacon | Activity (the mower's state with the reason folded in — `returning_rain`, `docked_rain_delay`; see below), battery, error code (disabled by default — see below), mowing progress (see below), job target area, job target duration, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name, and on a beacon-guided mower one battery percentage per UWB beacon (see below). |
+| `sensor` | 16 + one per beacon | Activity (the mower's state with the reason folded in — `returning_rain`, `docked_rain_delay`; see below), battery, error code (disabled by default — see below), mowing progress (see below), job target area, job target duration, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name, and on a beacon-guided mower one battery percentage per UWB beacon (see below) |
 | `binary_sensor` | 6 | Fault — a latched problem that stays on until the mower recovers or you clear it (see below) — plus rain sensor, rain delay, emergency stop, locked, animal protection: the mower's raw protection flags, from the `onProtectState` message the library drops (see below) |
 | `switch` | 8 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection, rain detection (see below) |
-| `number` | 3 + four per A1600 LiDAR Pro area | Notification volume, cutting direction, rain delay duration (see below), plus four writable area-parameter views per configured A1600 LiDAR Pro area (see below) |
+| `number` | 3 | Notification volume, cutting direction, rain delay duration (see below) |
 | `button` | 6 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), and "Clear fault" (releases the latched fault; see below) |
 | `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped — see below) |
-| `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, and `onMapTrace` on firmware 1.17); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
+| `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, `onMapTrace` on firmware 1.17, and `onMapInfo_V2` on 1.36 — that last one only ever arrives in answer to a `getMapInfo_V2` the integration now sends); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
 
-Not included yet: **RTK diagnostics** (position and satellite data) and
-zone control. RTK is planned for the next release; the other has no
-committed date.
+Not included yet: **RTK diagnostics** (position and satellite data). RTK is
+planned for the next release.
 
-### Area parameters
+### Zone-specific mowing
 
-On the **Ecovacs GOAT A1600 LiDAR Pro** (`e4gqia`), each configured mower
-area exposes four writable number entities: mowing height, mowing speed,
-obstacle height and cutting direction. The entities use the mower's numeric
-`areaID` for their identity and convert the mower's raw parameter levels to
-Home Assistant values.
+The `ecovacs_mower.mow_area` service starts a mowing job for one or more
+specified zone IDs using the mower's `spotArea` command.
 
-Writes are converted back to raw protocol values and sent as one complete
-`setAreaParameter` command. Each write merges the changed raw value with the
-other three raw values from the authoritative area snapshot; if the mower has
-not yet reported a complete snapshot, the write is refused rather than
-inventing defaults. State is not updated optimistically: the mower must report
-the resulting raw values through the normal area refresh.
+Zone mowing is currently confirmed only on the A1600 LiDAR Pro (`e4gqia`).
+If you have another mower class, zone mowing is not yet verified on that
+hardware; please report the device class in a new issue if you test it.
 
-This capability is intentionally restricted to `e4gqia`. The raw values and
-their meanings have been validated on that model only; matching field names
-on another GOAT model are not evidence that the semantics are the same.
-Other device classes will be enabled only after independent validation.
+The service requires a mower entity as its target and accepts one or more
+integer `area_ids` between `0` and `999`:
 
-### Area names
+```yaml
+action: ecovacs_mower.mow_area
+target:
+  entity_id: lawn_mower.my_goat
+data:
+  area_ids:
+    - 1
+    - 3
+```
 
-Area names are read from the mower when the integration refreshes its area
-inventory. Renaming an area in the Ecovacs app does not update the integration
-live because `deebot-client` does not expose unsolicited `getAreaSet`
-responses. Reload the integration or restart Home Assistant after changing an
-area name to refresh it.
+Multiple zones can be supplied in a single call. The service is stateless:
+it sends the requested zones directly to the targeted mower and does not
+attempt to determine whether the specified zones actually exist on the
+mower.
+
+The same service can also be used from Home Assistant's UI, where the mower
+entity and one or more zone IDs can be selected.
+
+The zone IDs are mower-specific. A value being within the accepted 0..999
+range does not imply that the mower has a zone with that ID.
 
 ### When a run stops because of rain
 
@@ -386,17 +389,19 @@ than the lawn.
 
 Two things worth knowing:
 
-- **Between jobs it holds the last job's figure**, and it is unknown rather than
-  0 before the first one. Most firmware reports zeros when nothing is running,
-  and a 0 there would be indistinguishable from a job that has just started;
-  some firmware never zeroes at all and keeps reporting the finished job's
-  numbers, which is why the entity refuses to read the payload at all while the
-  mower is parked. What clears the reading is the mower announcing that a job
-  ended, acted on when the next one begins — not the mower parking, since a run
-  that docks to charge and resumes is one job and keeping its figure through the
-  break is the point. On a mower that never sends those announcements the figure
-  simply stands until real numbers replace it, so the first minutes of a job can
-  still show the previous one's.
+- **Between jobs it holds the last job's figure**, and a bare telemetry zero
+  cannot reset it: most firmware reports zeros when nothing is running, and a
+  0 there would be indistinguishable from a job that has just started; some
+  firmware never zeroes at all and keeps reporting the finished job's numbers,
+  which is why the entity refuses to read the payload at all while the mower
+  is parked. What resets the reading — to 0, not unknown — is the mower
+  announcing that a job ended, acted on when the next one begins: unlike a
+  telemetry zero, that announcement removes the ambiguity, since it is the
+  device itself saying a new job has started. It is not the mower parking,
+  since a run that docks to charge and resumes is one job and keeping its
+  figure through the break is the point. On a mower that never sends those
+  announcements the figure simply stands until real numbers replace it, so the
+  first minutes of a job can still show the previous one's.
 - **"Finished" is not this entity's job.** A completed run publishes its final
   figure here, but that figure is not always 100: for a zone the target is the
   polygon's estimate, and a mower that considers itself done after 24 of 32 m²
@@ -413,8 +418,8 @@ Two things worth knowing:
   minutes while a run is in progress, stopping when the mower parks. A run
   interrupted by charging needs no special case — the mower docks, the poll
   stops, and it starts again when the job resumes. The poll is also why the
-  final figure comes from elsewhere: its five-minute cadence rarely lands on
-  the last percent of a run, so the reading is completed from the job-finished
+  final figure comes from elsewhere: its five-minute cadence rarely lands on the
+  last percent of a run, so the reading is completed from the job-finished
   message the mower pushes at the same moment.
 
 `paused` is deliberately not a reason to stop asking: it is a normal mid-run
@@ -444,12 +449,12 @@ attribute; this drops the `_battery` suffix since `device_class: battery`
 already says what the reading is, and the serial moved into the entity id and
 name since it is already the unique identifier for the sensor.
 
-They appear once the mower has answered `getLifeSpan` for the first time, not
-at setup: the payload is what says how many beacons there are and what they are
-called, and nothing else does. A beacon that stops being reported keeps its
-entity and reads unknown rather than holding the dead cell's last charge;
-deleting it is a manual step in the entity registry, deliberately, because a
-poll that failed is not proof that a beacon is gone.
+They appear once the mower has first reported its beacons, not at setup: the
+payload is what says how many there are and what they are called, and nothing
+else does. A beacon that stops being reported keeps its entity and reads unknown
+rather than holding the dead cell's last charge; deleting it is a manual step in
+the entity registry, deliberately, because a poll that failed is not proof that
+a beacon is gone.
 
 `deebot-client` drops these. Its `LifeSpan` enum has no member for the
 `uwbCell` component, and it raises on one rather than skipping it — which took
@@ -460,16 +465,35 @@ reported a value from before the beacons were paired that could never change.**
 That last one is fixed here too, as a side effect of not giving up on the
 answer.
 
-Two things this does not do yet:
+#### Two sources, and they do not always agree
 
-- **There is no per-beacon reset button.** The existing lifespan resets each
-  target a single component; targeting one beacon needs its serial, and the
-  wire format for that has not been captured. Reset the cell in the Ecovacs app
-  for now.
-- **It rides the poll.** No mower has been observed pushing `onLifeSpan`, so
-  the readings refresh on the same schedule as everything else that needs a
-  round trip — and on the firmware where those round trips fail intermittently,
-  they go stale for as long as the failures last.
+The mower also pushes the beacon batteries on its own, in an `onUWB` message the
+library has no handler for either. That push is what fills the sensors in when
+`getLifeSpan` is not answered — which happens on firmware 1.36.208, where polls
+return `errno 500` intermittently or constantly — and it fills them in faster
+after a restart, since it does not wait for a round trip.
+
+The two numbers are **not** interchangeable. On the four beacons this was
+captured against, three matched exactly and one read a round `100` in the push
+against `83` in `getLifeSpan`, in every sample across two days. Which one is
+correct cannot be settled from the wire; the only hint is that the push is the
+one reporting a round `100` where the other reports less, which is what
+saturating at the top of a range looks like.
+
+So the sensor picks deliberately rather than showing whichever arrived last: the
+`getLifeSpan` reading always wins, and a pushed one is only ever used for a
+beacon the poll has not reported. Otherwise the disputed beacon would flap
+between 83 % and 100 % and no low-battery automation built on it could be
+trusted.
+
+#### There is no per-beacon reset button, and none is needed
+
+The beacon percentage is a live measurement, not a consumable counter like the
+blade. Replacing a flat cell brought its reading back to 100 % on its own, with
+no reset command sent by anything — Home Assistant or the Ecovacs app — across a
+capture that contained every command either of them sent. So unlike the blade
+and the lens brush, there is nothing for a reset button to do. Issue #63 is
+closed on that basis.
 
 ### Entities disabled by default
 
@@ -496,8 +520,8 @@ above. This is the one entity in this list someone is likely to go
 looking for by name, so it's worth repeating here rather than only in the
 table.
 
-For an alarm, though, **`binary_sensor.<device>_fault` is the one
-you want** — it is enabled by default and, unlike the error sensor, it does
+For an alarm, though, **`binary_sensor.<device>_fault` is the one you
+want** — it is enabled by default and, unlike the error sensor, it does
 not go back to "fine" on its own. See the next section.
 
 ### A fault that stays until something actually clears it
@@ -507,7 +531,7 @@ not go back to "fine" on its own. See the next section.
 ([#53](https://github.com/nord-/ha-ecovacs-mower/issues/53)): a blade-disc
 jam pushed `code:[406]` exactly once and was followed **89 milliseconds
 later** by `code:[0]` — and then by another 3076 zeros over the 38 minutes
- the mower sat stuck on the lawn draining its battery. The error sensor read
+the mower sat stuck on the lawn draining its battery. The error sensor read
 `0` the whole time, and `lawn_mower` read `paused`, which is
 indistinguishable from a pause by hand. Nothing an automation could fire on
 existed for longer than a tenth of a second.
@@ -615,8 +639,19 @@ To get a usable log:
 For anything about the map, `deebot_client` at debug level is the only thing
 that shows whether the mower sends `onMI`/`onArI`/`onMapTrack`/
 `onSpecialContour` — or `onMapTrace`, which firmware 1.17 sends instead of
-`onMapTrack` — at all. That is the log to attach to a map issue, and the
-`info` fields have to be left intact: they are the map geometry itself.
+`onMapTrack`, or `onMapInfo_V2`, which is 1.36's replacement for `onMI` — at
+all. That is the log to attach to a map issue, and the `info` fields have to
+be left intact: they are the map geometry itself.
+
+On firmware older than 1.36, the `getMapInfo_V2` the integration sends at
+setup and after every reconnect may go unanswered, which `deebot_client` logs
+as `Command "getMapInfo_V2" was not successfully.` or `No response received
+for command "getMapInfo_V2"`. That warning is expected and harmless — the
+request is never retried and the boundary those firmwares push unasked as
+`onMI` arrives regardless. It is still worth reporting with the log around
+it: nobody has captured what pre-1.36 firmware answers here, and that capture
+is what would justify picking between `getMapInfo` and `getMapInfo_V2` per
+mower the way the clean commands already do.
 
 ## Current status
 

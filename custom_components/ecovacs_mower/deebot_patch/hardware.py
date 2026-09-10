@@ -27,17 +27,20 @@ from .commands import (
     GetAreaParameter,
     GetAreaSet,
     GetLifeSpanMower,
+    GetMapInfoV2,
     GetProtectState,
     GetRainDelay,
     GetStatsMower,
     MowerStateRefresh,
 )
+from .map_messages import MowerMapInfoEvent
 from .messages import (
     MowerBeaconsEvent,
     MowerProtectStateEvent,
     MowerRainDelayEvent,
     MowerStatsEvent,
 )
+from .zonal import MowArea
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,15 +59,17 @@ class MowerProfile:
 #   2px96q — GOAT O800 RTK (user-verified, issue #24). A second class string
 #            for the same hardware: upstream's 2px96q.py is byte-identical to
 #            9bts2s.py.
-#   77atlz — GOAT G1-800 (issue #30, firmware 1.36.208 — controls not
-#            confirmed). Upstream's 77atlz.py is byte-identical to 9bts2s.py,
-#            docstring included, so the O800's patch applies unchanged —
-#            but this firmware branch inverts the quirk the patch exists for.
-#            Issue #42 has the A/B on one install: patched, getCleanInfo
-#            answers errno 500 on every poll and clean is never acknowledged;
-#            unpatched, getCleanInfo_V2 answers first try and clean_V2 is
-#            acked in 526 ms. The class stays here because the family is now
-#            chosen at runtime rather than by this registry — see families.py.
+#   77atlz — GOAT G1-800 (issue #30, firmware 1.36.208 — controls
+#            user-verified from the lawn_mower entity, issue #74: start,
+#            pause/resume and dock all obeyed on 0.7.2). Upstream's 77atlz.py
+#            is byte-identical to 9bts2s.py, docstring included, so the O800
+#            RTK's patch applies unchanged — but this firmware branch inverts
+#            the quirk the patch exists for. Issue #42 has the A/B on one
+#            install: patched, getCleanInfo answers errno 500 on every poll
+#            and clean is never acknowledged; unpatched, getCleanInfo_V2
+#            answers first try and clean_V2 is acked in 526 ms. The class
+#            stays here because the family is now chosen at runtime rather
+#            than by this tuple — see families.py.
 #   e4gqia — GOAT A1600 LiDAR Pro (confirmed, PR #29, firmware 1.11.31).
 #            Upstream names this A3000 LiDAR Pro; its module is byte-identical
 #            to 9bts2s.py apart from the docstring, so the O800's patch
@@ -91,6 +96,19 @@ SUPPORTED_CLASSES: dict[str, MowerProfile] = {
     "xmp9ds": MowerProfile("xmp9ds"),
 }
 
+# ``spotArea`` has only been verified on the A1600 LiDAR Pro. Keep it limited to
+# that class until the payload shape has been verified on other firmware/classes.
+ZONE_AREA_CLASSES = ("e4gqia",)
+
+# Classes on which the border-job request shape has been captured from the
+# app (issue #12). Like ZONE_AREA_CLASSES, membership means "confirmed", not
+# "patched": the button is only built for these, because the non-V2 shape is
+# a guess nobody has tested — see border.py. Widening this tuple is how a
+# second class gains the button.
+#   77atlz — GOAT G1-800, firmware 1.36.208: clean_V2 with
+#            {"type": "border", "value": "mid:<mid>"}, acknowledged code 0.
+BORDER_CLASSES = ("77atlz",)
+
 
 def profile_for_class(class_: str) -> MowerProfile | None:
     """Return the validated integration profile for a device class."""
@@ -100,20 +118,23 @@ def profile_for_class(class_: str) -> MowerProfile | None:
 async def patch_device_info(class_: str) -> None:
     """Replace the cached device definition with one where the mow bugs are fixed.
 
-    Five corrections:
+    Six corrections:
 
     * ``clean.action.command``: ``CleanV2`` publishes on ``clean_V2``, which
       GOAT firmware ignores. Swapped for ``CleanMower`` on ``clean``.
+    * ``clean.action.area``: expose the verified GOAT ``spotArea`` area-clean
+      command for the A1600 LiDAR Pro. Existing library area commands are
+      preserved for other classes.
     * ``state``: the clean-info answer is a constant ``idle`` regardless of
       what the mower is actually doing (issue #48), and the library ran the
-      charge and clean-info answers concurrently in one ``TaskGroup`` — a race
-      that let a mower parked on its charger read as docked or as paused
+      charge and clean-info answers concurrently in one ``TaskGroup`` — a
+      race that let a mower parked on its charger read as docked or as paused
       depending on which answer landed last (issue #67). Swapped for
-      ``MowerStateRefresh``, one sequential command that awaits the charge half
-      before asking for clean info, so the record is written before the clean-
-      info answer is interpreted; the clean-info half picks its own command name,
-      ``getCleanInfo`` or ``getCleanInfo_V2``, from whichever the mower answers at
-      runtime — see ``families.py``.
+      ``MowerStateRefresh``, one sequential command that awaits the charge
+      half before asking for clean info, so the record is written before the
+      clean-info answer is interpreted; the clean-info half picks its own
+      command name, ``getCleanInfo`` or ``getCleanInfo_V2``, from whichever
+      the mower answers at runtime — see ``families.py``.
     * ``stats.clean``: ``GetStats`` drops ``mowedArea``, the one number that
       moves while a job runs. Swapped for ``GetStatsMower``.
     * ``life_span.get``: ``GetLifeSpan`` raises on the ``uwbCell`` entries a
@@ -121,6 +142,9 @@ async def patch_device_info(class_: str) -> None:
       listed after them. Swapped for ``GetLifeSpanMower``.
     * ``MowerProtectStateEvent``, ``MowerRainDelayEvent``, ``MowerStatsEvent``
       and ``MowerBeaconsEvent``: given the refresh commands they had none of.
+    * ``MowerMapInfoEvent``: given ``GetMapInfoV2``, without which firmware
+      1.36 never sends the lawn boundary at all — it answers the request and
+      pushes at no other time (issue #81).
 
     The call is idempotent and does nothing for classes outside
     ``SUPPORTED_CLASSES``.
@@ -142,14 +166,28 @@ async def patch_device_info(class_: str) -> None:
         return
 
     capabilities = base.capabilities
-    if capabilities.clean.action.command is CleanMower:
+    profile = profile_for_class(class_)
+    area_parameters = profile is not None and profile.area_parameters
+    # Most classes can return early once the common patch is already present.
+    # The A1600 area-parameter capability is different: it is an additional
+    # event mapping, so it must still be installed if another patch path has
+    # already supplied CleanMower.
+    if capabilities.clean.action.command is CleanMower and not area_parameters:
         return
 
     patched = replace(
         capabilities,
         clean=replace(
             capabilities.clean,
-            action=replace(capabilities.clean.action, command=CleanMower),
+            action=replace(
+                capabilities.clean.action,
+                command=CleanMower,
+                area=(
+                    MowArea
+                    if class_ in ZONE_AREA_CLASSES
+                    else capabilities.clean.action.area
+                ),
+            ),
         ),
         state=CapabilityEvent(StateEvent, [MowerStateRefresh()]),
         # Only stats.clean is replaced; total and report are the library's
@@ -210,9 +248,9 @@ async def patch_device_info(class_: str) -> None:
         MowerRainDelayEvent: [GetRainDelay()],
         MowerStatsEvent: [GetStatsMower()],
         MowerBeaconsEvent: [GetLifeSpanMower(capabilities.life_span.types)],
+        MowerMapInfoEvent: [GetMapInfoV2()],
     }
-    profile = profile_for_class(class_)
-    if profile is not None and profile.area_parameters:
+    if area_parameters:
         # One area event represents the whole area capability. The two protocol
         # reads populate one authoritative raw snapshot before notifying it.
         events[MowerAreaEvent] = [GetAreaParameter(), GetAreaSet()]

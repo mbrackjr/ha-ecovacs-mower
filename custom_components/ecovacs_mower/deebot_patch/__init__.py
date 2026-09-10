@@ -27,12 +27,28 @@ from .commands import (
     has_family,
 )
 from .families import attempted_family_name
-from .hardware import SUPPORTED_CLASSES, patch_device_info, profile_for_class
-from .map_messages import OnArI, OnMapTrace, OnMapTrack, OnMI, OnSpecialContour
+from .hardware import (
+    SUPPORTED_CLASSES,
+    ZONE_AREA_CLASSES,
+    patch_device_info,
+    profile_for_class,
+)
+from .map_messages import (
+    OnArI,
+    OnMapInfo,
+    OnMapTrace,
+    OnMapTrack,
+    OnMI,
+    OnSpecialContour,
+)
 from .messages import (
     OnChargeInfo,
     OnChargeState,
     OnCleanInfo,
+    OnMowAutoStart,
+    OnMowAutoStop,
+    OnMowBorderStart,
+    OnMowBorderStop,
     OnMowScheduleStart,
     OnMowScheduleStop,
     OnMowSpotAreaStart,
@@ -42,8 +58,10 @@ from .messages import (
     OnRainDelay,
     OnScheduleTaskInfo,
     OnStatsMower,
+    OnUwb,
 )
 from .state_precedence import register as register_mower_bus
+from .zonal import MowArea
 
 __all__ = [
     "SUPPORTED_CLASSES",
@@ -94,6 +112,10 @@ def apply() -> None:
         OnChargeInfo,
         OnChargeState,
         OnCleanInfo,
+        OnMowAutoStart,
+        OnMowAutoStop,
+        OnMowBorderStart,
+        OnMowBorderStop,
         OnMowScheduleStart,
         OnMowScheduleStop,
         OnMowSpotAreaStart,
@@ -103,7 +125,13 @@ def apply() -> None:
         OnRainDelay,
         OnScheduleTaskInfo,
         OnStatsMower,
+        OnUwb,
         OnArI,
+        # Registered under the full onMapInfo_V2, which the library already
+        # claims: get_message() matches that exactly before it strips the
+        # suffix, so this entry is what decides whether the boundary is
+        # decoded or dropped. The assertion below is what proves it took.
+        OnMapInfo,
         OnMapTrace,
         OnMapTrack,
         OnMI,
@@ -128,6 +156,12 @@ def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
         _fail(
             f"device {class_} was built with {capabilities.clean.action.command.__name__} "
             f"instead of CleanMower — the patch ran too late"
+        )
+
+    if class_ in ZONE_AREA_CLASSES and capabilities.clean.action.area is not MowArea:
+        _fail(
+            f"device {class_} was built without the patched MowArea capability "
+            f"— the patch ran too late"
         )
 
     # Exact type comparison, not isinstance: both GetCleanInfoV2 and our own

@@ -49,23 +49,13 @@ from deebot_client.commands.json.common import (
     ExecuteCommand,
     JsonCommandWithMessageHandling,
 )
-from deebot_client.commands.json.custom import CustomCommand
 from deebot_client.commands.json.life_span import GetLifeSpan
 from deebot_client.commands.json.stats import GetStats
 from deebot_client.const import DataType
 from deebot_client.events import LifeSpan, StateEvent
 from deebot_client.message import HandlingResult, HandlingState
 from deebot_client.models import CleanAction, CleanMode, State
-from deebot_client.rs.util import decompress_base64_data
 
-from .areas import (
-    MowerArea,
-    MowerAreaEvent,
-    _AreaSetFragmentBuffer,
-    _areas_for,
-    _as_int,
-    _notify,
-)
 from .families import Family, commit, note_attempt, selected
 from .messages import (
     BEACON_COMPONENT,
@@ -211,8 +201,8 @@ class _AdaptiveFamily:
 
     The raw response is read rather than the ``HandlingResult``, because
     ``CommandWithMessageHandling._handle_response`` collapses two very
-    different situations into ``HandlingState.FAILED``: ``errno 4200``,
-    the mower being offline, and ``errno 500``, which the library itself glosses as
+    different situations into ``HandlingState.FAILED``: ``errno 4200``, the
+    mower being offline, and ``errno 500``, which the library itself glosses as
     "network issues or does not support the command". Switching on ``FAILED``
     would mean a mower that is merely offline changed dialect.
 
@@ -541,192 +531,6 @@ class MowerStateRefresh(JsonCommandWithMessageHandling):
         )
 
 
-class GetAreaParameter(CustomCommand):
-    """Read all per-area mowing parameters from the mower."""
-
-    NAME = "getAreaParameter"
-
-    def __init__(self) -> None:
-        """Build the empty getAreaParameter request."""
-        super().__init__(self.NAME, {})
-
-    def _handle_response(
-        self, event_bus: EventBus, response: dict[str, Any]
-    ) -> HandlingResult:
-        """Merge the parameter response into the area snapshot."""
-        if response.get("ret") != "ok":
-            return super()._handle_response(event_bus, response)
-
-        try:
-            parameters = response["resp"]["body"]["data"]["areaParameters"]
-        except (KeyError, TypeError):
-            _LOGGER.debug("Unexpected getAreaParameter response: %r", response)
-            return HandlingResult.analyse()
-
-        if not isinstance(parameters, list):
-            _LOGGER.debug("Unexpected areaParameters value: %r", parameters)
-            return HandlingResult.analyse()
-
-        areas = _areas_for(event_bus)
-        for parameter in parameters:
-            if not isinstance(parameter, dict) or parameter.get("areaID") is None:
-                continue
-            area_id = str(parameter["areaID"])
-            current = areas.get(area_id, MowerArea(area_id))
-            areas[area_id] = current.__class__(
-                area_id=current.area_id,
-                name=current.name,
-                mow_height_level=_as_int(parameter.get("mowHeightLevel")),
-                cut_mode=_as_int(parameter.get("cutMode")),
-                obstacle_height=_as_int(parameter.get("obstacleHeight")),
-                angle=_as_int(parameter.get("angle")),
-            )
-
-        # getAreaSet owns inventory membership. Parameters only enrich existing
-        # areas (or provide a fallback area if parameters arrive first).
-        _notify(event_bus)
-        return HandlingResult.success()
-
-
-class GetAreaSet(CustomCommand):
-    """Read the mower's current area inventory and friendly names.
-
-    ``getAreaSet`` is not modelled by deebot-client. The response uses the
-    chunked Base64/LZMA decoder already provided by the pinned deebot-client
-    18.5.1 release. For ``ar`` the decoded rows are documented upstream as
-    ``mapID | areaID | name | neighbourIDs | 2 reference coordinates | flags``.
-    """
-
-    NAME = "getAreaSet"
-
-    def __init__(self) -> None:
-        """Build a request for mowing areas (``ar``)."""
-        # The GOAT expects mid/aid as well as type in the body data. A request
-        # containing only ``type=ar`` is rejected by the A1600 with
-        # ``code=20011, msg=get aid error``. This mirrors the payload emitted
-        # by the Ecovacs app and is required even though the response itself
-        # carries the area records.
-        super().__init__(
-            self.NAME,
-            {"mid": "1", "aid": "0", "type": "ar"},
-        )
-        # Keep the reassembly buffer on each command instance so multipart
-        # responses can be accumulated across asynchronous MQTT callbacks.
-        self._buffer = _AreaSetFragmentBuffer()
-
-    def _handle_response(
-        self, event_bus: EventBus, response: dict[str, Any]
-    ) -> HandlingResult:
-        # The Ecovacs app can issue getAreaSet independently. deebot-client only
-        # dispatches P2P responses associated with commands issued by this
-        # client, so app-originated responses are not visible here. Reloading
-        # the integration or restarting Home Assistant triggers a normal refresh.
-        """Merge decoded area inventory and names into the snapshot."""
-        if response.get("ret") != "ok":
-            return super()._handle_response(event_bus, response)
-
-        try:
-            data = response["resp"]["body"]["data"]
-            info = data["subsets"]
-        except (KeyError, TypeError):
-            _LOGGER.debug("Unexpected getAreaSet response: %r", response)
-            return HandlingResult.analyse()
-
-        if not isinstance(info, str):
-            return HandlingResult.analyse()
-
-        try:
-            index = int(data.get("index", 0))
-            info_size = int(data.get("infoSize", -1))
-        except (TypeError, ValueError):
-            return HandlingResult.analyse()
-
-        blob = self._buffer.add(str(data.get("batid", "")), index, info, info_size)
-        if blob is None:
-            return HandlingResult.success()
-
-        try:
-            decoded = __import__("orjson").loads(blob)
-        except __import__("orjson").JSONDecodeError:
-            _LOGGER.debug("Could not decode getAreaSet payload")
-            return HandlingResult.analyse()
-
-        if not isinstance(decoded, list):
-            return HandlingResult.analyse()
-
-        areas = _areas_for(event_bus)
-        reported_ids: set[str] = set()
-        for row in decoded:
-            if not isinstance(row, list) or len(row) < 2:
-                continue
-            area_id = str(row[1]).strip()
-            if not area_id:
-                continue
-            reported_ids.add(area_id)
-            name = row[2] if len(row) >= 3 else None
-            if isinstance(name, str) and name.strip():
-                current = areas.get(area_id, MowerArea(area_id))
-                areas[area_id] = current.__class__(
-                    area_id=current.area_id,
-                    name=name.strip(),
-                    mow_height_level=current.mow_height_level,
-                    cut_mode=current.cut_mode,
-                    obstacle_height=current.obstacle_height,
-                    angle=current.angle,
-                )
-            elif area_id not in areas:
-                areas[area_id] = MowerArea(area_id)
-
-        # A non-empty decoded response with no valid area IDs is malformed; do
-        # not destroy the last known inventory in that case. An empty list is a
-        # valid snapshot and intentionally clears the inventory.
-        if decoded and not reported_ids:
-            _LOGGER.debug("Could not find area IDs in getAreaSet payload")
-            return HandlingResult.analyse()
-
-        # A successfully decoded ``ar`` response is the authoritative area
-        # inventory, so IDs absent from it no longer exist on the mower.
-        for area_id in tuple(areas):
-            if area_id not in reported_ids:
-                del areas[area_id]
-
-        _notify(event_bus)
-        return HandlingResult.success()
-
-
-class SetAreaParameter(CustomCommand):
-    """Set the complete raw parameter set for one mower area."""
-
-    NAME = "setAreaParameter"
-
-    def __init__(
-        self,
-        *,
-        area_id: str,
-        mow_height_level: int,
-        cut_mode: int,
-        obstacle_height: int,
-        angle: int,
-    ) -> None:
-        """Build a complete setAreaParameter request using raw mower values.
-
-        The mower expects all five area fields on every write. The caller must
-        therefore merge a changed value with the authoritative raw area state
-        before constructing this command. This class deliberately knows nothing
-        about Home Assistant units or model-specific value mappings.
-        """
-        super().__init__(
-            self.NAME,
-            {
-                "areaID": area_id,
-                "mowHeightLevel": mow_height_level,
-                "cutMode": cut_mode,
-                "obstacleHeight": obstacle_height,
-                "angle": angle,
-            },
-        )
-
-
 class GetProtectState(JsonCommandWithMessageHandling, OnProtectState):
     """Ask for the protection flags instead of waiting for a push.
 
@@ -772,6 +576,44 @@ class GetRainDelay(JsonCommandWithMessageHandling, OnRainDelay):
     """
 
     NAME = "getRainDelay"
+
+
+class GetMapInfoV2(ExecuteCommand):
+    """Ask for the lawn boundary, which is never pushed unasked.
+
+    Every other map message in this integration is unsolicited telemetry.
+    ``onMapInfo_V2`` is not: on a GOAT G1-800 (``77atlz``, fw 1.36.208) the
+    32 KB of outline arrives only as the answer to this request, and it is
+    the reason ``onMI``/``onArI``/``onSpecialContour`` are absent from every
+    capture anyone has taken against this integration, idle or mid-job. The
+    integration subscribed and waited for a push no client had asked for, so
+    the map could only ever be a bare coverage patch with no field around it
+    (issue #81).
+
+    Nothing here parses an answer, because there is nothing in it: the reply
+    is ``{"code": 0, "msg": "ok"}`` and the payload follows a fraction of a
+    second later on the ``atr`` topic, where ``OnMapInfo`` picks it up. That
+    is what ``ExecuteCommand`` is — a non-zero ``code`` reported as a failure,
+    no response parsing — and the event bus asks nothing more of a refresh
+    command than that it complete: ``_call_refresh_function`` awaits the
+    execute and never checks whether an event came out of it, so a refresh
+    that publishes nothing is neither retried nor logged as failed.
+
+    The library's own ``GetMapInfoV2`` cannot stand in for this one. It
+    inherits ``OnMapInfoV2``'s message handler, which reads ``body.data`` —
+    an ack carries none, so the handler falls through to an abstract base,
+    returns ``None``, and the library logs "returned no response. This is a
+    bug" on every refresh. It also defaults ``mid`` to the empty string.
+
+    The app sends a ``bdTaskID`` alongside ``type``. It is omitted here on the
+    working assumption that it is optional — the same evidence-free footing as
+    every other argument nobody has been able to omit and test yet.
+    """
+
+    NAME = "getMapInfo_V2"
+
+    def __init__(self) -> None:
+        super().__init__({"type": "0"})
 
 
 class SetRainDelay(ExecuteCommand):

@@ -5,6 +5,20 @@ fw 1.11.31) and verified against the official app's map; the ``_v117`` ones
 were captured 2026-08-26 from two GOAT O800 RTK (2px96q) on firmware 1.17.8
 and 1.17.11 (issue #41). No deebot-client or Home Assistant needed — this
 file runs on Windows.
+
+The ``on_map_trace_g1800_*`` four are byte-exact ``onMapTrace_V2`` payloads a
+GOAT G1-800 (77atlz, fw 1.36.208) pushed on 2026-08-30, taken from the MQTT
+debug log of issue #52: the docked snapshot at 09:17:28, the cleared sections
+one second into the job at 09:17:47, and two blobs of the border run itself,
+09:18:05 and 09:18:14. Only the header timestamps are replaced — ``mid`` is
+the placeholder ``123456789`` the firmware itself puts on every trace (issue
+#52) — and every ``info`` is the base64 the device sent, each decompressing
+to exactly the ``infoSize`` its log line declared.
+
+The two job blobs are a pair on purpose. Nine seconds apart, they carry the
+same 52-point run under two different ids — "1" while it is the only run,
+"2" once a newer one exists — so the newest-first renumbering is captured
+rather than inferred.
 """
 
 from __future__ import annotations
@@ -133,6 +147,15 @@ def test_fragment_buffer_evicts_oldest_when_full() -> None:
     )
 
 
+def _point_set(record: str) -> set[tuple[int, int]]:
+    """The distinct x,y of a record, ignoring any field past the second."""
+    return {
+        tuple(int(value) for value in part.split(",")[:2])
+        for part in record.split(";")
+        if "," in part
+    }
+
+
 def _blob(key: str) -> bytes:
     """Decode a fixture, joining fragments when multipart."""
     fragments = _fragments(key)
@@ -238,6 +261,73 @@ def test_parse_map_info_v117_idle_carries_nothing() -> None:
     assert info.zones is None and info.corridors is None
 
 
+# ``on_map_info_v2_g1800`` is the seven-fragment ``onMapInfo_V2`` answer a
+# GOAT G1-800 (77atlz, fw 1.36.208) gave on 2026-08-30, byte for byte, with
+# only ``mid`` and the header timestamps replaced. The device sent the same
+# 32137-byte blob three times that day and all three reassemble identically
+# (issue #81).
+def test_map_info_v2_reassembles_to_the_size_the_device_declared() -> None:
+    # Seven fragments, and the blob that decides issue #81. Pinned before
+    # anything is read out of it: a short reassembly would fail the tests
+    # below in a way that looks like a parser bug.
+    fragments = _fragments("on_map_info_v2_g1800")
+    assert len(fragments) == 7
+    blob = _blob("on_map_info_v2_g1800")
+    assert len(blob) == fragments[0]["infoSize"] == 32137
+
+
+def test_parse_map_info_reads_the_firmware_136_boundary() -> None:
+    # The record leads with an id, not the "s1" marker of every earlier
+    # dialect. Keyed on "s1" alone, the parser walked past this blob and
+    # returned no boundary — 32 KB of lawn claimed and dropped (#81).
+    info = parse_map_info(_blob("on_map_info_v2_g1800"))
+    assert info.boundary is not None
+    assert info.boundary[0] == (-11918, 1959)
+    assert len(info.boundary) == 692
+    assert info.zones is None and info.corridors is None
+    # Same closure rule as every other dialect: within one grid step.
+    end_x, end_y = info.boundary[-1]
+    assert abs(end_x - info.boundary[0][0]) <= STEP_MM
+    assert abs(end_y - info.boundary[0][1]) <= STEP_MM
+
+
+def test_parse_map_info_drops_the_firmware_136_point_flag() -> None:
+    # Every point is "<x>,<y>,1" here. Unpacking two values out of three
+    # raises, and the raise is swallowed as an undecodable blob, so the
+    # third field has to be dropped rather than merely ignored downstream.
+    blob = _blob("on_map_info_v2_g1800")
+    assert b";-11918,1959,1;" in blob
+    boundary = parse_map_info(blob).boundary
+    assert all(len(point) == 2 for point in boundary)
+
+
+def test_map_info_v2_section_2_retraces_section_1() -> None:
+    # Not read, and recorded so the fixture says why. Section 2 is the same
+    # outline at the 50 mm step where section 1 collapses straight runs:
+    # 1924 points against 692, and it contains every one of them. Section 1
+    # is the boundary in every dialect, so that is what is published.
+    sections = json.loads(_blob("on_map_info_v2_g1800"))
+    coarse = _point_set(sections[0][1])
+    fine = _point_set(sections[1][1])
+    assert len(coarse) == 672 and len(fine) == 1909
+    assert coarse <= fine
+
+
+def test_map_info_v2_section_3_holds_the_islands() -> None:
+    # Thirteen closed shapes inside the lawn, ids 100-116 — the same
+    # numbering onArI's obstacle section uses. MapInfo has nowhere to put
+    # them yet; the fixture keeps them for whoever wires them up.
+    sections = json.loads(_blob("on_map_info_v2_g1800"))
+    islands = sections[2][1:]
+    assert len(islands) == 13
+    assert [record.split(";")[0] for record in islands][:3] == [
+        "100",
+        "101",
+        "102",
+    ]
+    assert sections[3] == ["4"] and sections[4] == ["5"]
+
+
 def test_parse_area_info_v117_zones_obstacles_and_empty_nogo() -> None:
     area = parse_area_info(_blob("on_ari_v117_multipart"))
     assert [len(zone) for zone in area.map_info.zones] == [326, 462, 479]
@@ -332,3 +422,70 @@ def test_parse_map_trace_multipart_carries_holes() -> None:
     assert len(covered.areas) == 1
     assert len(covered.areas[0]) == 257
     assert [len(hole) for hole in covered.holes] == [8, 14, 24, 8, 8, 8]
+
+
+def test_parse_map_trace_idle_still_reads_section_1() -> None:
+    # The shape a docked G1-800 sends, and what the two below regress
+    # against: reading section 3 must not cost the classic section-1 form.
+    covered = parse_map_trace(_blob("on_map_trace_g1800_idle"))
+    assert [len(area) for area in covered.areas] == [13]
+    assert covered.areas[0][0] == (-968, 9)
+    assert covered.holes == []
+
+
+def test_parse_map_trace_drops_the_id_only_record_of_a_border_job() -> None:
+    # The whole freeze in issue #52 hangs off this one filter. A border job
+    # puts the batch id alone in section 1; kept, it decodes to [] and the
+    # event is areas=[[]] on every blob for the length of the job, so the
+    # bus dedups all of them against the first and the coverage layer
+    # stops moving. Asserted on its own because it looks like a tidiness
+    # check that a later refactor would drop.
+    covered = parse_map_trace(
+        b'[["1","1958878756;"],["2"],["3"]]'
+    )
+    assert covered.areas == []
+    assert covered.holes == []
+
+
+def test_parse_map_trace_reads_the_live_geometry_from_section_3() -> None:
+    # A single run, nine seconds before the blob below: section 1 holds the
+    # batch id alone and the whole mowed outline sits in section 3.
+    covered = parse_map_trace(_blob("on_map_trace_g1800_job_one_run"))
+    assert [len(area) for area in covered.areas] == [52]
+    assert covered.areas[0][0] == (-1318, -790)
+    assert covered.holes == []
+
+
+def test_parse_map_trace_keeps_the_newest_run_first() -> None:
+    # Newest first: the firmware renumbers the older run to "2" and starts
+    # a new "1". Nothing renders in that order today — areas is drawn as an
+    # unordered set of polygons — but a stroked coverage layer would care,
+    # so the order is pinned here rather than re-derived from a log later.
+    covered = parse_map_trace(_blob("on_map_trace_g1800_job_two_runs"))
+    assert [len(area) for area in covered.areas] == [7, 52]
+    assert covered.areas[0][0] == (-3318, -840)
+    assert covered.holes == []
+
+    # The renumbering itself, and the reason both blobs are fixtures: the
+    # run that was "1" nine seconds earlier is the same polygon, point for
+    # point, now second.
+    earlier = parse_map_trace(_blob("on_map_trace_g1800_job_one_run"))
+    assert covered.areas[1] == earlier.areas[0]
+
+
+def test_parse_map_trace_shares_a_frame_between_section_1_and_section_3() -> None:
+    # Why section 3 is allowed to feed the same list as section 1 rather
+    # than a second event: the docked snapshot and the mid-job record of
+    # the same capture retrace a run of the same lawn, point for point.
+    idle = parse_map_trace(_blob("on_map_trace_g1800_idle")).areas[0]
+    live = parse_map_trace(_blob("on_map_trace_g1800_job_two_runs")).areas[1]
+    assert idle[6:12] == live[36:42]
+    assert len(idle[6:12]) == 6
+
+
+def test_parse_map_trace_job_start_clears_everything() -> None:
+    # One second into a job the firmware empties all three sections. That
+    # must decode as "nothing mowed", not as an empty polygon.
+    covered = parse_map_trace(_blob("on_map_trace_g1800_job_cleared"))
+    assert covered.areas == []
+    assert covered.holes == []

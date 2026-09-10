@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.const import CONF_DEVICE_ID, CONF_PASSWORD, CONF_USERNAME
@@ -10,6 +10,11 @@ from homeassistant.core import HomeAssistant
 
 from . import EcovacsMowerConfigEntry
 from .const import CONF_CREDENTIALS, CONF_OVERRIDE_MQTT_URL, CONF_OVERRIDE_REST_URL
+
+if TYPE_CHECKING:
+    from deebot_client.device import Device
+
+    from .controller import EcovacsController
 
 # CONF_OVERRIDE_MQTT_URL/CONF_OVERRIDE_REST_URL are redacted so that
 # self-hosted installations do not leak their internal broker or REST address in
@@ -41,6 +46,20 @@ from .const import CONF_CREDENTIALS, CONF_OVERRIDE_MQTT_URL, CONF_OVERRIDE_REST_
 # the MQTT topic; "did" is already masked, but without "resource" the topic can
 # still be reconstructed) are in the TypedDict and come along entirely
 # unabridged — device.device_info *is* the raw api dict.
+#
+# "btMac" and "btName" are the mower's Bluetooth identity, and they leak by the
+# same mechanism as "homeId": outside the TypedDict, carried through whole. The
+# set below has listed "mac" since it was written, which reads like it covers
+# the first of them and does not — async_redact_data matches keys exactly, and a
+# GOAT payload has no "mac" key at all. The Wi-Fi MAC reaches the device
+# registry by an entirely different path (Device.mac, into DeviceInfo's
+# connections), never through this dict, so "mac" masks nothing here; it stays
+# only because the payload shape is Ecovacs' to change, not ours to pin.
+#
+# Masking both matters more than the usual "it is an identifier" argument: a MAC
+# is globally unique and geolocatable through public BSSID databases, and the
+# diagnostics dump is the artifact users are asked to attach to a GitHub issue —
+# the one path every other entry in this set exists to protect.
 REDACT = {
     CONF_USERNAME,
     CONF_PASSWORD,
@@ -54,6 +73,8 @@ REDACT = {
     "resource",
     "homeId",
     "mac",
+    "btMac",
+    "btName",
 }
 
 
@@ -65,7 +86,31 @@ async def async_get_config_entry_diagnostics(
     return {
         "config": async_redact_data(dict(entry.data), REDACT),
         "devices": [
-            async_redact_data(dict(device.device_info), REDACT)
+            async_redact_data(
+                dict(device.device_info) | _fault(controller, device),
+                REDACT,
+            )
             for device in controller.devices
         ],
+    }
+
+
+def _fault(controller: EcovacsController, device: Device) -> dict[str, Any]:
+    """The mower's latched fault, folded into its own device entry.
+
+    ``controller.fault_latches`` is keyed by ``did``, and so are ``maps`` and
+    the map stores. None of them may be published as they are:
+    ``async_redact_data`` replaces the *value* under a redacted key and never
+    looks at keys, so a dict keyed by ``did`` would put the identifier exactly
+    where redaction does not reach. Riding along in the device entry, the fault
+    goes through the same redaction as everything else about that device and
+    introduces no key of its own (issue #65).
+
+    Both values are safe as they are: the code is a number from the device, the
+    text a fixed English string from ``errors.py`` or deebot-client.
+    """
+    latch = controller.fault_latches.get(device.device_info["did"])
+    return {
+        "fault_code": latch.code if latch else None,
+        "fault_description": latch.description if latch else None,
     }

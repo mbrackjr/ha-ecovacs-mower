@@ -22,6 +22,7 @@ from deebot_client.rs.map import PositionType
 from custom_components.ecovacs_mower.deebot_patch import apply
 from custom_components.ecovacs_mower.deebot_patch.commands import GetChargeStateMower
 from custom_components.ecovacs_mower.deebot_patch.messages import (
+    MowerBeaconsEvent,
     MowerJobEdgeEvent,
     MowerProtectStateEvent,
     MowerRainDelayEvent,
@@ -30,6 +31,8 @@ from custom_components.ecovacs_mower.deebot_patch.messages import (
     OnChargeInfo,
     OnChargeState,
     OnCleanInfo,
+    OnMowBorderStart,
+    OnMowBorderStop,
     OnMowScheduleStart,
     OnMowScheduleStop,
     OnMowSpotAreaStart,
@@ -39,7 +42,9 @@ from custom_components.ecovacs_mower.deebot_patch.messages import (
     OnRainDelay,
     OnScheduleTaskInfo,
     OnStatsMower,
+    OnUwb,
     handle_clean_info,
+    notify_mower_beacons,
 )
 from custom_components.ecovacs_mower.deebot_patch.state_precedence import register
 
@@ -1039,6 +1044,70 @@ def test_a_payload_without_a_trigger_is_analysed() -> None:
     assert result.state == HandlingState.ANALYSE
 
 
+# border-* from a GOAT G1-800 (77atlz, fw 1.36.208) on 2026-08-30, issue #74.
+# A third payload dialect: ``triggerType`` instead of ``trigger``, and the
+# stop carries ``cuttedArea`` instead of ``mowedArea``.
+_BORDER_START = {
+    "index": "0000000842",
+    "mapid": "2049987783",
+    "mowId": "1788074264229565",
+    "triggerType": "app",
+    "ts": "1788074264230",
+}
+_BORDER_STOP = {
+    "index": "0000000851",
+    "mapid": "2049987783",
+    "mowId": "1788074264229565",
+    "triggerType": "app",
+    "ts": "1788074293897",
+    "cuttedArea": 1.63,
+    "workArea": 19.24,
+    "time": 0.083333,
+}
+
+
+def test_a_border_start_reads_the_trigger_from_triggerType() -> None:
+    """The border dialect names its trigger ``triggerType`` (issue #74)."""
+    (event,) = _notified_edges(OnMowBorderStart, _BORDER_START)
+
+    assert event.phase == "start"
+    assert event.trigger == "app"
+    assert event.mowed_area is None
+    assert event.work_area is None
+
+
+def test_a_border_stop_reads_the_mowed_area_from_cuttedArea() -> None:
+    """The border stop calls its mowed square metres ``cuttedArea`` (issue #74)."""
+    (event,) = _notified_edges(OnMowBorderStop, _BORDER_STOP)
+
+    assert event.phase == "stop"
+    assert event.trigger == "app"
+    assert event.mowed_area == 1.63
+    assert event.work_area == 19.24
+
+
+def test_the_original_keys_win_over_the_border_dialect() -> None:
+    """A payload carrying both spellings is read the way it always was.
+
+    The fallbacks must not change what the schedule and spot-area paths see —
+    ``trigger`` before ``triggerType``, ``mowedArea`` before ``cuttedArea``.
+    """
+    (event,) = _notified_edges(
+        OnMowScheduleStop,
+        {**_SCHEDULE_STOP_COMPLETE, "triggerType": "app", "cuttedArea": 1.0},
+    )
+
+    assert event.trigger == "workComplete"
+    assert event.mowed_area == 320.567505
+
+
+def test_the_border_job_edge_names_are_registered() -> None:
+    apply()
+
+    assert MESSAGES["onFwBuryPoint-bd_task-mow-border-start"] is OnMowBorderStart
+    assert MESSAGES["onFwBuryPoint-bd_task-mow-border-stop"] is OnMowBorderStop
+
+
 async def test_two_identical_starts_both_reach_the_subscriber() -> None:
     """_seq, not defensiveness: two reborn starts are byte-identical payloads.
 
@@ -1056,7 +1125,7 @@ async def test_two_identical_starts_both_reach_the_subscriber() -> None:
     assert len(published) == 2
 
 
-def test_the_four_job_edge_names_are_registered() -> None:
+def test_the_schedule_and_spotarea_job_edge_names_are_registered() -> None:
     apply()
 
     assert MESSAGES["onFwBuryPoint-bd_task-mow-schedule-start"] is OnMowScheduleStart
@@ -1112,3 +1181,275 @@ def test_a_job_edge_survives_the_whole_message_path() -> None:
     assert event.phase == "stop"
     assert event.trigger == "workComplete"
     assert event.work_area == 320.567505
+
+
+# The onUWB push verbatim from the log attached to issue #40, a GOAT G1-800
+# (77atlz) on firmware 1.36.208 with four beacons, captured during a border job.
+# Serials are placeholders; the reporter redacted the real ones. x/y are zeroed
+# in the push — unlike the getPos reply, where uwbPos carries map-frame
+# coordinates — and state/otaResult read 0 on all four including the flat one,
+# which is what rules state out as a health flag.
+_UWB_PUSH = {
+    "mid": 2049987783,
+    "uwbPos": [
+        {"x": 0, "y": 0, "sn": "BEACON-1", "state": 0, "battery": 100, "otaResult": 0},
+        {"x": 0, "y": 0, "sn": "BEACON-2", "state": 0, "battery": 68, "otaResult": 0},
+        {"x": 0, "y": 0, "sn": "BEACON-3", "state": 0, "battery": 0, "otaResult": 0},
+        {"x": 0, "y": 0, "sn": "BEACON-4", "state": 0, "battery": 73, "otaResult": 0},
+    ],
+}
+
+# The same four beacons as the life-span source reports them, from the same
+# capture. BEACON-1 is the one the two sources disagree about: a round 100 in
+# the push above, 83 here, in all seven samples across two days and before and
+# after another beacon's cells were replaced. The other three agree exactly.
+_LIFE_SPANS_SAME_BEACONS = [
+    {"type": "uwbCell", "sn": "BEACON-1", "left": 83, "total": 100},
+    {"type": "uwbCell", "sn": "BEACON-2", "left": 68, "total": 100},
+    {"type": "uwbCell", "sn": "BEACON-3", "left": 0, "total": 100},
+    {"type": "uwbCell", "sn": "BEACON-4", "left": 73, "total": 100},
+]
+
+
+def _pushed_beacons(bus, data: dict[str, Any]) -> list[tuple[str, float]]:
+    """Run OnUwb against *bus* and return the readings it published.
+
+    The bus is passed in rather than made here: every precedence test needs the
+    life-span source to have spoken on the *same* bus first, and the readings
+    are keyed by it.
+    """
+    OnUwb._handle_body_data_dict(bus, data)
+    return [
+        (beacon.sn, beacon.percent)
+        for call_ in bus.notify.call_args_list
+        if isinstance(call_.args[0], MowerBeaconsEvent)
+        for beacon in call_.args[0].beacons
+    ]
+
+
+def test_on_uwb_publishes_the_batteries_the_push_carries() -> None:
+    # Nothing has polled yet, which is the case this exists for: the poll is
+    # what fails with errno 500 on this firmware (issue #42).
+    assert _pushed_beacons(Mock(), _UWB_PUSH) == [
+        ("BEACON-1", 100.0),
+        ("BEACON-2", 68.0),
+        ("BEACON-3", 0.0),
+        ("BEACON-4", 73.0),
+    ]
+
+
+def test_on_uwb_keeps_the_life_span_reading_where_the_two_disagree() -> None:
+    # The whole reason this handler cannot simply republish what it is handed.
+    # BEACON-1 reads 100 in the push and 83 in the life-span answer, every
+    # sample; feeding both into one event would flap the sensor between them.
+    # Which number is *right* is unsettled, so the one that is never optimistic
+    # wins and the other is only ever a floor.
+    # Only the disputed beacon has been polled, so the push has something to
+    # contribute for the other three and does publish — which is the only case
+    # where the two numbers could ever meet in one event.
+    bus = Mock()
+    notify_mower_beacons(bus, _LIFE_SPANS_SAME_BEACONS[:1])
+    # Without this the life-span event itself would be counted as the push's
+    # output and the assertion would hold whatever OnUwb did.
+    bus.reset_mock()
+
+    assert ("BEACON-1", 83.0) in _pushed_beacons(bus, _UWB_PUSH)
+
+
+def test_on_uwb_says_nothing_when_the_poll_has_reported_every_beacon() -> None:
+    # Once every serial is polled the push contributes nothing, so it publishes
+    # nothing rather than a set the bus would have to dedupe.
+    bus = Mock()
+    notify_mower_beacons(bus, _LIFE_SPANS_SAME_BEACONS)
+    bus.reset_mock()
+
+    assert _pushed_beacons(bus, _UWB_PUSH) == []
+
+
+def test_on_uwb_fills_in_the_beacon_the_poll_never_reported() -> None:
+    # The set is published whole, not just the serial the push contributes:
+    # EcovacsBeaconSensor reads a beacon missing from an event as unknown, so a
+    # partial set would blank the three the poll does know.
+    bus = Mock()
+    notify_mower_beacons(bus, _LIFE_SPANS_SAME_BEACONS[:3])
+    bus.reset_mock()
+
+    assert _pushed_beacons(bus, _UWB_PUSH) == [
+        ("BEACON-1", 83.0),
+        ("BEACON-2", 68.0),
+        ("BEACON-3", 0.0),
+        ("BEACON-4", 73.0),
+    ]
+
+
+def test_a_life_span_answer_that_drops_a_beacon_stops_speaking_for_it() -> None:
+    # The readings are replaced, not merged: an answer that no longer lists
+    # BEACON-1 is the life-span source withdrawing its claim about it, and the
+    # push is then the only thing that knows anything.
+    bus = Mock()
+    notify_mower_beacons(bus, _LIFE_SPANS_SAME_BEACONS)
+    notify_mower_beacons(bus, _LIFE_SPANS_SAME_BEACONS[1:])
+    bus.reset_mock()
+
+    assert ("BEACON-1", 100.0) in _pushed_beacons(bus, _UWB_PUSH)
+
+
+def test_on_uwb_unions_in_a_polled_beacon_the_push_omits() -> None:
+    # Whole relative to the poll, not just to this push: BEACON-4 has been
+    # polled but this push does not mention it at all, and a fifth, never
+    # polled serial is what makes the push contribute and therefore publish.
+    # Omission is not the same as the life-span source withdrawing its claim —
+    # only notify_mower_beacons gets to do that — so BEACON-4 must still
+    # appear, sourced from the poll.
+    bus = Mock()
+    notify_mower_beacons(bus, _LIFE_SPANS_SAME_BEACONS)
+    bus.reset_mock()
+
+    published = _pushed_beacons(
+        bus,
+        {
+            "uwbPos": [
+                {"sn": "BEACON-1", "battery": 100},
+                {"sn": "BEACON-2", "battery": 68},
+                {"sn": "BEACON-3", "battery": 0},
+                {"sn": "BEACON-5", "battery": 42},
+            ]
+        },
+    )
+
+    assert set(published) == {
+        ("BEACON-1", 83.0),
+        ("BEACON-2", 68.0),
+        ("BEACON-3", 0.0),
+        ("BEACON-4", 73.0),
+        ("BEACON-5", 42.0),
+    }
+
+
+def test_life_span_readings_are_kept_per_bus() -> None:
+    # _LIFE_SPAN_READINGS is keyed by EventBus for the same reason
+    # state_precedence's records are: a message handler is a classmethod that
+    # receives nothing else to key on, and every device has its own bus. A
+    # life-span answer on one device must not decide precedence for another.
+    bus_a, bus_b = Mock(), Mock()
+    notify_mower_beacons(bus_a, _LIFE_SPANS_SAME_BEACONS)
+    bus_a.reset_mock()
+    bus_b.reset_mock()
+
+    assert _pushed_beacons(bus_b, _UWB_PUSH) == [
+        ("BEACON-1", 100.0),
+        ("BEACON-2", 68.0),
+        ("BEACON-3", 0.0),
+        ("BEACON-4", 73.0),
+    ]
+
+
+def test_a_life_span_answer_with_no_beacons_at_all_stops_speaking_for_any() -> None:
+    # The replace has to happen even when the new set is empty: a mower that
+    # stops reporting beacons entirely (unpaired, or a firmware that drops
+    # the component) is exactly the case where a stale reading would
+    # otherwise linger forever, since there is never a later non-empty
+    # answer to replace it.
+    bus = Mock()
+    notify_mower_beacons(bus, _LIFE_SPANS_SAME_BEACONS)
+    notify_mower_beacons(bus, [])
+    bus.reset_mock()
+
+    assert _pushed_beacons(bus, _UWB_PUSH) == [
+        ("BEACON-1", 100.0),
+        ("BEACON-2", 68.0),
+        ("BEACON-3", 0.0),
+        ("BEACON-4", 73.0),
+    ]
+
+
+def test_on_uwb_ignores_the_zeroed_coordinates() -> None:
+    # x/y are 0 on every sample of this push, so they are not positions. OnPos
+    # is where a real one comes from.
+    bus = Mock()
+    OnUwb._handle_body_data_dict(bus, _UWB_PUSH)
+
+    assert not any(
+        isinstance(call_.args[0], PositionsEvent)
+        for call_ in bus.notify.call_args_list
+    )
+
+
+def test_on_uwb_drops_a_beacon_with_no_serial() -> None:
+    # Same rule as the life-span parser: without a serial the reading cannot be
+    # attributed to a beacon, and the wrong beacon is worse than none.
+    assert _pushed_beacons(
+        Mock(),
+        {
+            "uwbPos": [
+                {"battery": 20},
+                {"sn": "BEACON-2", "battery": 50},
+            ]
+        },
+    ) == [("BEACON-2", 50.0)]
+
+
+def test_on_uwb_drops_a_non_dict_entry() -> None:
+    # A bare string in uwbPos has no .get, so the isinstance guard is what
+    # keeps it from raising instead of just being dropped like any other
+    # entry without a usable serial.
+    assert _pushed_beacons(
+        Mock(),
+        {"uwbPos": ["not-a-dict", {"sn": "BEACON-2", "battery": 50}]},
+    ) == [("BEACON-2", 50.0)]
+
+
+def test_on_uwb_drops_a_repeated_serial() -> None:
+    # A repeated sn would reach the sensor platform as two entities sharing one
+    # unique_id. Keep the first reading, drop the rest.
+    assert _pushed_beacons(
+        Mock(),
+        {
+            "uwbPos": [
+                {"sn": "BEACON-1", "battery": 20},
+                {"sn": "BEACON-1", "battery": 80},
+            ]
+        },
+    ) == [("BEACON-1", 20.0)]
+
+
+@pytest.mark.parametrize("battery", ["68", None, True, -1, 101])
+def test_on_uwb_drops_a_battery_it_cannot_read_as_a_percentage(battery: Any) -> None:
+    # A bare float() would turn "68" into a reading and True into 1 %. Out of
+    # range is dropped too: this field feeds a battery device class, and HA's
+    # own low-battery handling is built on it meaning what it says.
+    assert _pushed_beacons(
+        Mock(),
+        {
+            "uwbPos": [
+                {"sn": "BEACON-1", "battery": battery},
+                {"sn": "BEACON-2", "battery": 50},
+            ]
+        },
+    ) == [("BEACON-2", 50.0)]
+
+
+def test_on_uwb_without_a_position_list_asks_for_analysis() -> None:
+    # The handler directly rather than through Message.handle, for the reason
+    # test_on_rain_delay_without_enable_asks_for_analysis documents.
+    result = OnUwb._handle_body_data_dict(Mock(), {"mid": 1})
+    assert result.state is HandlingState.ANALYSE
+
+
+def test_on_uwb_handles_a_push_with_no_beacons() -> None:
+    # A mower that navigates without beacons has an empty list to report, not a
+    # payload this handler failed to understand.
+    result = OnUwb._handle_body_data_dict(Mock(), {"mid": 1, "uwbPos": []})
+    assert result.state is HandlingState.SUCCESS
+
+
+def test_on_uwb_message_name() -> None:
+    assert OnUwb.NAME == "onUWB"
+
+
+def test_on_uwb_is_registered_by_apply() -> None:
+    # The library has no handler at all, so without this the push is logged as
+    # 'Unknown message "onUWB"' and the beacon sensors move only on the poll
+    # (issue #40).
+    apply()
+    assert MESSAGES["onUWB"] is OnUwb
