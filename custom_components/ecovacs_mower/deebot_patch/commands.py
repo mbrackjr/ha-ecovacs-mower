@@ -262,9 +262,9 @@ class _AdaptiveFamily:
 
 
 def has_family(command: Command) -> bool:
-    """Whether *command* is one of the two whose wire format depends on the
-    mower's dialect (issue #42) — the only commands ``family_name()`` means
-    anything for.
+    """Whether *command* is one of the commands whose wire format depends on the
+    mower's dialect (issue #42) — CleanMower, GetCleanInfoMower, MowArea and
+    MowBorder today — the only commands ``family_name()`` means anything for.
 
     Used by ``entity.py`` to decide whether to name the family in the
     unconfirmed-command warning: doing so unconditionally would print it next
@@ -301,6 +301,29 @@ class _NoActionRewrite:
     ) -> tuple[HandlingResult, dict[str, Any]]:
         """Execute without consulting the last state."""
         return await Command._execute(self, authenticator, device_info, event_bus)
+
+
+class _TaskClean(_NoActionRewrite):
+    """A ``start`` for one named task type, on whichever topic the subclass adds.
+
+    ``spotArea`` (issue #11) and ``border`` (issue #12) share the shape
+    ``{"act": "start", "content": {"type": <task>, "value": <argument>}}``
+    and differ only in the two strings. One builder keeps them identical the
+    day the firmware wants a third field, and keeps the action-rewrite bypass
+    in one place. Not sendable on its own: a concrete subclass mixes in
+    ``Clean`` or ``CleanV2`` to supply ``NAME`` and the topic.
+    """
+
+    def __init__(self, task: str, value: str) -> None:
+        self._task = task
+        self._value = value
+        super().__init__(CleanAction.START)
+
+    def _get_args(self, action: CleanAction) -> dict[str, Any]:
+        return {
+            "act": action.value,
+            "content": {"type": self._task, "value": self._value},
+        }
 
 
 class _CleanNonV2(_NoActionRewrite, Clean):

@@ -70,6 +70,15 @@ SUPPORTED_CLASSES = ("2i0fns", "9bts2s", "2px96q", "77atlz", "e4gqia", "xmp9ds")
 # that class until the payload shape has been verified on other firmware/classes.
 ZONE_AREA_CLASSES = ("e4gqia",)
 
+# Classes on which the border-job request shape has been captured from the
+# app (issue #12). Like ZONE_AREA_CLASSES, membership means "confirmed", not
+# "patched": the button is only built for these, because the non-V2 shape is
+# a guess nobody has tested — see border.py. Widening this tuple is how a
+# second class gains the button.
+#   77atlz — GOAT G1-800, firmware 1.36.208: clean_V2 with
+#            {"type": "border", "value": "mid:<mid>"}, acknowledged code 0.
+BORDER_CLASSES = ("77atlz",)
+
 
 async def patch_device_info(class_: str) -> None:
     """Replace the cached device definition with one where the mow bugs are fixed.

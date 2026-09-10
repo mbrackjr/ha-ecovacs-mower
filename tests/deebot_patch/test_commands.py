@@ -963,3 +963,19 @@ def test_get_map_info_v2_parses_nothing_from_the_ack() -> None:
         GetMapInfoV2._handle_body(Mock(), {"code": 500}).state
         is HandlingState.FAILED
     )
+
+
+async def test_stop_goes_out_untouched_whatever_the_last_state_was() -> None:
+    # Issue #51. The app's Beenden is {"act": "stop", "content": {"type": ""}}
+    # on clean_V2, which is CleanV2's own shape; the wrapper's START/RESUME
+    # decision must leave STOP alone even while the mower reads paused.
+    bus = _bus()
+    bus.notify(StateEvent(State.PAUSED))
+    fake, sent = _transport(_NO_ANSWER, _OK)
+    command = CleanMower(CleanAction.STOP)
+
+    with patch.object(Command, "_execute", fake):
+        await command._execute(AsyncMock(), _DEVICE_INFO, bus)
+
+    assert sent == ["clean", "clean_V2"]
+    assert command._delegate(Family.V2)._args == {"act": "stop", "content": {"type": ""}}

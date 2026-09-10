@@ -81,7 +81,7 @@ merely that the class string was seen:
 | **Ecovacs GOAT O1200 LiDAR Pro** | `2i0fns` | the author's own hardware |
 | **Ecovacs GOAT O800 RTK** | `9bts2s` | a user, firmware 1.13.8 ([#8](https://github.com/nord-/ha-ecovacs-mower/issues/8)) |
 | **Ecovacs GOAT O800 RTK** | `2px96q` | a user, controls and state confirmed — start/pause in [#24](https://github.com/nord-/ha-ecovacs-mower/issues/24), state on firmware 1.17.11 in [#56](https://github.com/nord-/ha-ecovacs-mower/issues/56). Firmware 1.17 speaks a second map dialect, decoded from two users' logs but not yet confirmed on hardware ([#41](https://github.com/nord-/ha-ecovacs-mower/issues/41)) |
-| **Ecovacs GOAT G1-800** | `77atlz` | a user, firmware 1.36.208 — the protection-flag sensors in [#30](https://github.com/nord-/ha-ecovacs-mower/issues/30), start/pause/resume/dock from the `lawn_mower` entity in [#74](https://github.com/nord-/ha-ecovacs-mower/issues/74). That firmware branch answers the `V2` command family instead of the one every other confirmed mower uses, and the integration detects and switches to it automatically, so no manual configuration is needed ([#42](https://github.com/nord-/ha-ecovacs-mower/issues/42)) |
+| **Ecovacs GOAT G1-800** | `77atlz` | a user, firmware 1.36.208 — the protection-flag sensors in [#30](https://github.com/nord-/ha-ecovacs-mower/issues/30), start/pause/resume/dock from the `lawn_mower` entity in [#74](https://github.com/nord-/ha-ecovacs-mower/issues/74). That firmware branch answers the `V2` command family instead of the one every other confirmed mower uses, and the integration detects and switches to it automatically, so no manual configuration is needed ([#42](https://github.com/nord-/ha-ecovacs-mower/issues/42)); border mowing is built for this class from the request captured in [#12](https://github.com/nord-/ha-ecovacs-mower/issues/12) and awaits confirmation on hardware |
 | **Ecovacs GOAT A1600 LiDAR Pro** | `e4gqia` | a user, firmware 1.11.31 ([#29](https://github.com/nord-/ha-ecovacs-mower/pull/29)) — zone mowing confirmed ([#78](https://github.com/nord-/ha-ecovacs-mower/pull/78)) |
 | **Ecovacs GOAT A1600 RTK** | `xmp9ds` | reported, patch not yet confirmed — firmware 1.17.9 ([#43](https://github.com/nord-/ha-ecovacs-mower/issues/43)) |
 
@@ -164,8 +164,9 @@ stored, and the entry stops asking. There is no need to delete and re-add it.
 
 ## What you get
 
-Forty-two entities on the mower's device page, across eight platforms —
-plus one per UWB beacon on the models that use them:
+Forty-three entities on the mower's device page, across eight platforms —
+forty-four on the G1-800, which alone gets the "Mow border" button — plus
+one per UWB beacon on the models that use them:
 
 | Platform | Count | What |
 |---|---|---|
@@ -174,7 +175,7 @@ plus one per UWB beacon on the models that use them:
 | `binary_sensor` | 6 | Fault — a latched problem that stays on until the mower recovers or you clear it (see below) — plus rain sensor, rain delay, emergency stop, locked, animal protection: the mower's raw protection flags, from the `onProtectState` message the library drops (see below) |
 | `switch` | 8 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection, rain detection (see below) |
 | `number` | 3 | Notification volume, cutting direction, rain delay duration (see below) |
-| `button` | 6 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), and "Clear fault" (releases the latched fault; see below) |
+| `button` | 7, 8 on the G1-800 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), "Clear fault" (releases the latched fault; see below), "End mowing task" (ends the current job for good; see below) and, on the G1-800, "Mow border" (starts a border job; see below) |
 | `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped — see below) |
 | `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, `onMapTrace` on firmware 1.17, and `onMapInfo_V2` on 1.36 — that last one only ever arrives in answer to a `getMapInfo_V2` the integration now sends); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
 
@@ -213,6 +214,43 @@ entity and one or more zone IDs can be selected.
 
 The zone IDs are mower-specific. A value being within the accepted 0..999
 range does not imply that the mower has a zone with that ID.
+
+### Border mowing
+
+The *Edge cutting* switch is a setting: it decides whether an ordinary job
+also trims the perimeter. Border mowing is a separate task the mower runs on
+its own, and the **Mow border** button starts one — the same job the Ecovacs
+app starts from its border-mowing action. While it runs the mower reports
+`mowing`, the progress sensor tracks the strip along the boundary rather than
+the lawn, and the map keeps updating.
+
+The button exists only on classes where the request the app sends has been
+captured, which today is the GOAT G1-800 (`77atlz`). If you have another
+mower and would like the button, open an issue with a debug log of the app
+starting a border job; the request shape and the device class are what it
+needs.
+
+The command names the mower's current map, which the integration learns from
+the map messages the mower sends. Right after a restart that can take a few
+seconds; pressing the button before then answers "The mower has not reported
+its map yet; try again in a moment" and asks the mower for its map, so the
+next press works.
+
+### Ending a task
+
+Sending the mower back to its dock does not end the job. The mower keeps it
+as resumable — the app shows the unfinished progress with *End* and
+*Continue* — and a later *Start* resumes it instead of beginning a fresh
+cycle. The **End mowing task** button is the app's *End*: it ends the
+current job for good, so the next start is a new one. Useful in automations
+that interrupt a job during the day and want tomorrow's run to start from
+scratch.
+
+The payload is confirmed on the G1-800 (`77atlz`), where the app's own
+request was captured ([#51](https://github.com/nord-/ha-ecovacs-mower/issues/51)).
+On the O-series and A-series mowers it sends the same shape those mowers
+already accept for *Pause*; if it does nothing on yours, a debug log of the
+app's *End* on that mower is what settles it.
 
 ### When a run stops because of rain
 
@@ -510,7 +548,7 @@ a bug: if one of these looks blank or "unavailable," this is why.
 | `switch` | 7 of 7 | all of them: advanced mode, TrueDetect, edge cutting, child lock, lift warning, boundary crossing warning, safety protection |
 | `number` | 2 of 2 | both: volume, cutting direction |
 | `sensor` | 4 of the 16 fixed ones | IP address, Wi-Fi signal strength, Wi-Fi network name, and **error code**. The per-beacon sensors are enabled |
-| `button` | 4 of 6 | the four consumable-lifespan resets (blade, lens brush, trimmer brush, weed rope) — "Locate mower" and "Clear fault" are enabled by default |
+| `button` | 4 of 7 (4 of 8 on the G1-800) | the four consumable-lifespan resets (blade, lens brush, trimmer brush, weed rope) — "Locate mower", "Clear fault", "End mowing task" and, on the G1-800, "Mow border" are enabled by default |
 
 **If you're planning anything on the error sensor** — an alarm, a
 notification, a dashboard card — note that it does not exist as an
