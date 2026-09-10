@@ -1,4 +1,4 @@
-# Ecovacs Mower for Home Assistant
+# CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -32,46 +32,23 @@ CI also runs hassfest and HACS validation (`.github/workflows/hassfest.yml`). Th
 
 Releases are cut by `.github/workflows/release.yml`, which runs after the test suite succeeds on `master`: if the version in `manifest.json` has no matching `v<version>` tag, it creates the tag and publishes a release with generated notes. A push whose version is already tagged is a no-op, so the bump commit is what triggers a release — never a hand-made tag.
 
+Cutting a release is therefore three steps, and the bump is the one commit that goes straight onto `master` without a PR — the maintainer pushes it with the admin bypass, the way every bump so far has landed: (1) list what has merged since the last tag with `git log v<last>..origin/master --merges` and pick the level from it — a `feat:` in there means a minor bump, only fixes means a patch; (2) change `version` in `manifest.json`, the only place the version lives, in a commit titled `chore: bump to <version>` with nothing else in it; (3) push, report the commit hashes, and stop — the maintainer watches the `Release` run produce the `v<version>` tag, so do not poll CI after a bump. Anything else that should ship in the release — docs included — must be on `master` before the bump commit, since the generated notes cover exactly the commits between the two tags.
+
 ## Architecture
 
 ### The patch layer is the only connection to deebot-client's internals
 
 `deebot_patch/` is the boundary: **no other module may touch private parts of `deebot_client`** (`_DEVICES`, `MESSAGES`, `_AuthClient`). If the library is swapped for a vendored client, only that folder needs rewriting.
 
-Prefer the repository's established `deebot_patch` modules before introducing new architectural structure. Protocol commands belong in `commands.py`, protocol/domain state belongs in the existing feature-specific patch module, and upstream capability corrections belong in `hardware.py`. Add a new patch module or abstraction only when the existing structure cannot accommodate the functionality cleanly, or when the benefit of the separation clearly outweighs the additional conceptual surface. Preserve existing module boundaries unless there is a concrete reason to change them.
-
-- `commands.py` — `CleanMower` and `GetCleanInfoMower`, family-adaptive wrappers that send whichever of the V2/non-V2 command pair the mower actually answers on (issue #42), and `MowerStateRefresh`, which replaces the library's two concurrent state commands with one sequential command so the charge half is recorded before the clean-info half is interpreted (issue #67). New patch protocol commands should normally be added here rather than creating another command module.
-- `hardware.py` — `SUPPORTED_CLASSES` is the authoritative supported-device registry. Each entry identifies a supported device class and records additional capabilities that have been independently validated for that class. `patch_device_info()` seeds the `_DEVICES` cache with corrected `Capabilities` (`CleanMower` + `capabilities.state = [MowerStateRefresh()]`). Uses the library's own caching mechanism instead of monkeypatching. Membership means basic integration support; a capability flag means the corresponding behavior has been validated on that specific class.
-- `areas.py` — authoritative dynamic mower-area state and the protocol parsing needed to populate it. Area identity/count is learned at runtime, so this is an explicit dynamic feature exception rather than a static capability description.
+- `commands.py` — `CleanMower` and `GetCleanInfoMower`, family-adaptive wrappers that send whichever of the V2/non-V2 command pair the mower actually answers on (issue #42), and `MowerStateRefresh`, which replaces the library's two concurrent state commands with one sequential command so the charge half is recorded before the clean-info half is interpreted (issue #67).
+- `hardware.py` — `patch_device_info()` seeds the `_DEVICES` cache with corrected `Capabilities` (`CleanMower` + `capabilities.state = [MowerStateRefresh()]`). Uses the library's own caching mechanism instead of monkeypatching. `SUPPORTED_CLASSES` lists the device classes to patch (`2i0fns` = O1200 LiDAR Pro, `9bts2s` and `2px96q` = O800 RTK, `77atlz` = G1-800, `e4gqia` = A1600 LiDAR Pro, `xmp9ds` = A1600 RTK — the LiDAR Pro and RTK variants are different machines, not two strings for one). Membership means "we patch it", not "someone confirmed it works" — `xmp9ds` is the entry whose controls nobody has confirmed, and the comment block above the tuple records how each class was confirmed. `ZONE_AREA_CLASSES` is the opposite kind of tuple: membership means zone mowing *is* confirmed on that class, and only those receive `MowArea` as their `area` capability (`e4gqia` so far). `BORDER_CLASSES` is the same kind as `ZONE_AREA_CLASSES`: membership means the border-job request shape is captured on that class, and only those get the `mow_border` button (`77atlz` so far). It gates a button rather than a capability, because `Capabilities` has no field for it — `button.py` checks the class string directly.
 - `messages.py` — `OnChargeInfo` and `OnScheduleTaskInfo`, the two unsolicited messages the library lacks a handler for.
+- `zonal.py` — `MowArea`, the `spotArea` command that starts one or more saved mowing areas, built on the same `_AdaptiveFamily` machinery as `CleanMower` so `families.py` stays the only place that decides the topic. Exposed to HA as the `ecovacs_mower.mow_area` entity service, which `lawn_mower.py` gates on `area is MowArea` and answers with a clear error for every other class.
+- `border.py` — `MowBorder`, the `border` task-start command (issue #12), built on the same `_AdaptiveFamily` machinery as `MowArea` and sharing `_TaskClean`, the `{"type", "value"}` payload builder in `commands.py`, with it. Needs the id of the map in use, which it does not fetch: it is handed one by `button.py`, which reads it from `state_precedence.map_id_for()`. Exposed as the `mow_border` button, alongside `end_task`, which is `CleanMower(CleanAction.STOP)` and needs nothing from this module (issue #51).
 - `families.py` — which of the V2/non-V2 command pair a given mower answers on, keyed by `did` and learned at runtime rather than from the class string (issue #42).
-- `state_precedence.py` — per-device record, keyed by `EventBus`, that prefers "docked" over a paused plan and remembers what a suppressed state was (issue #67).
+- `state_precedence.py` — per-device record, keyed by `EventBus`, of the facts the handlers learn from the stream: that the mower is docked, which beats a paused plan, and what the suppressed state was (issue #67); and the id of the map the mower is using, written by `map_messages._MapMessage` from every map message's envelope and read by the border button (issue #12). `register()` is also the marker that says a bus belongs to a patched mower rather than a vacuum on the same account.
 - `authentication.py` — `AccountAuthenticator`, which renews the session from the `uid`/`accessToken` pair a login or a device verification returns instead of re-posting the password. Backport of the still-open DeebotUniverse/client.py#1743. It wraps two name-mangled privates of `_AuthClient` on the instance; the pair is persisted in `entry.data[CONF_CREDENTIALS]` by the config flow and read back by the controller. Without it, Ecovacs' `1013` answer to the password login sends the entry into an endless reauth loop (issue #21).
 - `__init__.py` — `apply()` (registers the messages, idempotent) and `verify_capabilities()`.
-
-### Device identity and model-specific capability resolution
-
-Device identity is established by `deebot-client` on `Device` creation. The patch layer must treat the device class/model as the primary capability discriminator and retain firmware as first-class identity metadata. Do not duplicate that identity as a second authoritative state store when the `Device` already owns it.
-
-`hardware.py` owns the patch-side `SUPPORTED_CLASSES` registry. Its entries may decide whether a protocol capability exists for a verified device class, but they must not contain model- or firmware-specific conversion from raw device values to human-sensible Home Assistant values.
-
-**Raw-value representation boundary:** `deebot_patch` owns the Ecovacs wire format and raw protocol values only. Any model- or firmware-specific interpretation of those raw values — for example, mapping a numeric mow-height level to centimetres, a cut-mode level to metres per second, an obstacle-height code to centimetres, or a wire-space angle to an HA/app-space angle — lives exclusively in the HA layer. Such mappings must be selected there from the actual device identity and must never be generalized from one mower to another without independent validation. Firmware-specific representation is subject to the same rule even when the protocol field names are identical.
-
-**Validated-capability boundary:** A capability whose raw values or human-sensible representation has only been validated on specific mower classes must be explicitly restricted to those classes. Do not advertise, enable, or generalize that capability to other classes merely because their protocol fields look similar. Add another class only after its area data and semantics have been independently validated on that hardware.
-
-Do not scatter model/class/firmware capability conditionals through HA platforms. The HA layer may select its representation mapping from the patch/device identity, but the mapping itself belongs only to HA. The patch must not import HA modules or depend on HA units, entity semantics, or presentation values.
-
-Feature state belongs below HA. For dynamic mower areas, `deebot_patch` owns one authoritative `area_id -> MowerArea` snapshot containing the stable numeric area ID, optional friendly name, and raw protocol parameter values. HA must consume that snapshot and must not maintain a second authoritative copy of area state.
-
-### Mower area capability
-
-The area capability is a dynamic exception analogous to beacon discovery: area IDs/count are learned at runtime rather than declared in the static capability list. The patch exposes one `MowerAreaEvent` containing the complete area snapshot. Its refresh capability owns both active reads (`getAreaParameter` and `getAreaSet`); HA subscribes to that single event and requests that refresh without knowing the Ecovacs wire format.
-
-`getAreaSet` establishes the mower's current area inventory and friendly names. `getAreaParameter` enriches those areas with the four raw parameters. The handlers write the authoritative state before notifying the event because `EventBus.notify` deduplicates equal events before subscriber callbacks and subscriptions are asynchronous.
-
-Area entity identity is based only on numeric `areaID`. Friendly names are mutable metadata and may change without changing HA entity identity. The current implementation has four writable A1600 views: each write must use one cohesive `setAreaParameter` operation that merges the changed field into the authoritative area's complete raw state before sending the mower command. The write path must never maintain a second per-entity copy of the other parameters.
-
-The four current area settings are dynamic `number` entities because their identity/count is learned at runtime. Their HA-unit mappings remain exclusively in the HA layer and are enabled only for mower classes whose raw-value semantics have been independently validated. Do not create four independent protocol commands or four independent protocol state stores.
 
 ### The order in `EcovacsController.initialize()` is a hard invariant
 
@@ -93,20 +70,16 @@ Subscribing is still right for *reacting* to a state — `fault.py` and the enti
 
 ### Entity platforms
 
-`lawn_mower` filters on `device_type is DeviceType.MOWER`. The others (`sensor`, `switch`, `number`, `button`, `event`) are built declaratively: an `ENTITY_DESCRIPTIONS` tuple of `EcovacsCapabilityEntityDescription` subclasses with `capability_fn`, fed through `util.get_supported_entities()`. New entities are added as an entry in that tuple — not as a new class.
-
-Dynamic entities are the explicit exception when entity identity/count cannot be known until runtime, as with beacons and mower areas. Such exceptions should still reuse `EcovacsDescriptionEntity`/standard HA descriptions and remain a thin projection of patch-owned state; they must not introduce a parallel entity architecture or a second authoritative state store.
+`lawn_mower` filters on `device_type is DeviceType.MOWER`. The others (`sensor`, `switch`, `number`, `button`, `event`) are built declaratively: an `ENTITY_DESCRIPTIONS` tuple of `EcovacsCapabilityEntityDescription` subclasses with `capability_fn`, fed through `util.get_supported_entities()`. New entities are added as an entry in that tuple — not as a new class. The exception is a command that needs the device's runtime state or has no library capability — such a button is one more entry in `button.py`'s `MOWER_COMMAND_DESCRIPTIONS`, whose `command_fn` builds the command from the device at press time.
 
 `entity.py` has the base classes (`EcovacsEntity`, `EcovacsDescriptionEntity`); subscribing to events happens via `_subscribe()` in `async_added_to_hass`. Commands go out through `_execute_command()`, never `self._device.execute_command()` directly — the wrapper is what logs an unconfirmed command under this integration's own logger instead of leaving it to `deebot_client` (issue #26).
 
 ## Conventions
 
 - **This is a public repo — all outward-facing text is English**: docstrings, comments, commit messages, PR descriptions, issue/discussion replies. Code identifiers are English too. Forked modules open their docstring with what was removed compared to core.
-- **Preserve existing remarks:** do not delete, rewrite, condense, or move existing comments/docstrings/remarks when changing code. Existing remarks carry architectural rationale, hardware evidence, issue references, and operational constraints. The only allowed changes are (a) comments/docstrings we add ourselves, (b) small corrections to an existing remark when the underlying fact is actually corrected, or (c) a narrowly scoped clarification required by a functionality change. Do not treat comment cleanup as part of refactoring.
 - Comments explain *why*, especially where the code looks needlessly convoluted (exact type comparison instead of `isinstance`, in-place mutation instead of rebinding). Don't remove them to "clean up".
 - `strings.json` and `translations/en.json` must be **identical** — `test_translations.py` guards this, nothing syncs them automatically. Never create an `sv.json`; the HA frontend's language here is English.
 - Every translation key and `icons.json` key must belong to a real entity — the platform tests check both directions.
-- New hardware is supported by adding the device class to `SUPPORTED_CLASSES`. Unsupported MOWER classes log a warning with the class string; that's the string users are asked to report. Additional capability flags in `SUPPORTED_CLASSES` must only be enabled after independent validation on that class.
-- Prefer the existing `deebot_patch` modules and established repository patterns for new protocol work. Introduce a new module or abstraction only when the existing structure cannot accommodate it cleanly or the benefits clearly outweigh the additional surface area.
+- New hardware is supported by adding the device class to `SUPPORTED_CLASSES`. Unsupported MOWER classes log a warning with the class string; that's the string users are asked to report.
 - Version is bumped in `manifest.json`, and that bump is what publishes a release once it lands on `master` (see above). The bump belongs in its own commit by the maintainer after the work has landed, never in a feature PR: `release.yml` tags whatever version it finds without checking that it is newer than the last tag, so two branches bumping in parallel publish releases out of order. `deebot-client` is pinned there and in `requirements-test.txt` — keep them in sync.
 - Conventional commits, no AI attribution.
