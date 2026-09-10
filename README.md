@@ -164,8 +164,9 @@ stored, and the entry stops asking. There is no need to delete and re-add it.
 
 ## What you get
 
-Forty-four entities on the mower's device page, across eight platforms —
-plus one per UWB beacon on the models that use them:
+Forty-three entities on the mower's device page, across eight platforms —
+forty-four on the G1-800, which alone gets the "Mow border" button — plus
+one per UWB beacon on the models that use them:
 
 | Platform | Count | What |
 |---|---|---|
@@ -174,7 +175,7 @@ plus one per UWB beacon on the models that use them:
 | `binary_sensor` | 6 | Fault — a latched problem that stays on until the mower recovers or you clear it (see below) — plus rain sensor, rain delay, emergency stop, locked, animal protection: the mower's raw protection flags, from the `onProtectState` message the library drops (see below) |
 | `switch` | 8 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection, rain detection (see below) |
 | `number` | 3 | Notification volume, cutting direction, rain delay duration (see below) |
-| `button` | 8 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), "Clear fault" (releases the latched fault; see below), "End mowing task" (ends the current job for good; see below) and, on the G1-800, "Mow border" (starts a border job; see below) |
+| `button` | 7, 8 on the G1-800 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), "Clear fault" (releases the latched fault; see below), "End mowing task" (ends the current job for good; see below) and, on the G1-800, "Mow border" (starts a border job; see below) |
 | `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped — see below) |
 | `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, `onMapTrace` on firmware 1.17, and `onMapInfo_V2` on 1.36 — that last one only ever arrives in answer to a `getMapInfo_V2` the integration now sends); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
 
@@ -547,7 +548,7 @@ a bug: if one of these looks blank or "unavailable," this is why.
 | `switch` | 7 of 7 | all of them: advanced mode, TrueDetect, edge cutting, child lock, lift warning, boundary crossing warning, safety protection |
 | `number` | 2 of 2 | both: volume, cutting direction |
 | `sensor` | 4 of the 16 fixed ones | IP address, Wi-Fi signal strength, Wi-Fi network name, and **error code**. The per-beacon sensors are enabled |
-| `button` | 4 of 8 | the four consumable-lifespan resets (blade, lens brush, trimmer brush, weed rope) — "Locate mower", "Clear fault", "End mowing task" and "Mow border" are enabled by default |
+| `button` | 4 of 7 (4 of 8 on the G1-800) | the four consumable-lifespan resets (blade, lens brush, trimmer brush, weed rope) — "Locate mower", "Clear fault", "End mowing task" and, on the G1-800, "Mow border" are enabled by default |
 
 **If you're planning anything on the error sensor** — an alarm, a
 notification, a dashboard card — note that it does not exist as an
