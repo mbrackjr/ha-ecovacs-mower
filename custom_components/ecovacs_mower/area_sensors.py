@@ -1,9 +1,10 @@
 """Dynamic Home Assistant entities for mower area parameters.
 
-Area identity and state are owned by ``deebot_patch``. This module only turns
-that state into the four model-specific area parameter views. The entities are
-dynamic because the mower reports its area IDs at runtime, just like the
-existing beacon sensors.
+Area identity and state are owned by ``deebot_patch``. This module turns
+that state into model-specific writable parameter views or, where no validated
+mapping exists, read-only raw diagnostic views. The entities are dynamic
+because the mower reports its area IDs at runtime, just like the existing
+beacon sensors.
 
 Model- and firmware-specific conversion from raw device values to
 human-sensible Home Assistant values lives exclusively in this HA layer. The
@@ -27,10 +28,12 @@ from deebot_client.capabilities import DeviceType
 from deebot_client.device import Device
 
 from homeassistant.components.number import NumberEntity, NumberEntityDescription
+from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
 from homeassistant.const import DEGREE, EntityCategory, UnitOfLength, UnitOfSpeed
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.typing import StateType
 
 from . import EcovacsMowerConfigEntry
 from .deebot_patch.areas import (
@@ -443,35 +446,136 @@ class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
         self._device.events.request_refresh(MowerAreaEvent)
 
 
+@dataclass(kw_only=True, frozen=True)
+class EcovacsAreaRawSensorEntityDescription(SensorEntityDescription):
+    """Describe one dynamic raw-value view of one mower area."""
+
+    value_fn: Callable[[MowerArea], StateType]
+    parameter_name: str
+    suggested_object_id: str | None = None
+
+
+def area_raw_sensor_descriptions(
+    area_id: str,
+) -> tuple[EcovacsAreaRawSensorEntityDescription, ...]:
+    """Return read-only raw area parameter views."""
+    return tuple(
+        EcovacsAreaRawSensorEntityDescription(
+            key=f"area_{area_id}_{key_suffix}",
+            name=parameter_name,
+            value_fn=value_fn,
+            parameter_name=parameter_name,
+            suggested_object_id=f"{area_id}_{key_suffix}",
+            entity_category=EntityCategory.DIAGNOSTIC,
+        )
+        for key_suffix, parameter_name, value_fn in (
+            (
+                "raw_mow_height_level",
+                "Raw mowing height level",
+                lambda a: a.mow_height_level,
+            ),
+            ("raw_cut_mode", "Raw cut mode", lambda a: a.cut_mode),
+            (
+                "raw_obstacle_height",
+                "Raw obstacle height",
+                lambda a: a.obstacle_height,
+            ),
+            ("raw_angle", "Raw angle", lambda a: a.angle),
+        )
+    )
+
+
+class EcovacsAreaRawSensor(EcovacsDescriptionEntity, SensorEntity):
+    """Expose one raw parameter from one mower area without interpretation."""
+
+    entity_description: EcovacsAreaRawSensorEntityDescription
+
+    def __init__(
+        self,
+        device: Device,
+        area_id: str,
+        description: EcovacsAreaRawSensorEntityDescription,
+        area_name: str,
+    ) -> None:
+        """Initialize the dynamic raw area entity."""
+        super().__init__(device, device.capabilities, description)
+        self._area_id = area_id
+        self._set_area_name(area_name)
+
+    def _set_area_name(self, area_name: str) -> None:
+        """Set the integration-provided name without changing identity."""
+        self._attr_name = f"{area_name} - {self.entity_description.parameter_name}"
+
+    def set_area_name(self, area_name: str) -> None:
+        """Update the integration-provided name after the mower reports it."""
+        name = f"{area_name} - {self.entity_description.parameter_name}"
+        self._set_area_name(area_name)
+        if self.hass is None or self.entity_id is None:
+            return
+        registry = er.async_get(self.hass)
+        if registry.async_get(self.entity_id) is None:
+            return
+        registry.async_update_entity(self.entity_id, original_name=name)
+        self.async_write_ha_state()
+
+    @property
+    @override
+    def suggested_object_id(self) -> str | None:
+        """Use the numeric area ID, never the mutable friendly name."""
+        return self.entity_description.suggested_object_id
+
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to the authoritative area snapshot."""
+        await super().async_added_to_hass()
+        self._subscribe(MowerAreaEvent, self._on_area_state)
+
+    async def _on_area_state(self, event: MowerAreaEvent) -> None:
+        """Project this area's raw parameter into the sensor state."""
+        area = next((a for a in event.areas if a.area_id == self._area_id), None)
+        self._attr_native_value = None if area is None else self.entity_description.value_fn(area)
+        if area is not None and area.name:
+            self.set_area_name(area.name)
+        self.async_write_ha_state()
+
+
 async def async_setup_area_sensors(
     config_entry: EcovacsMowerConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
     *,
     number_platform: bool = False,
 ) -> None:
-    """Add dynamic area number entities from the HA number platform.
+    """Add dynamic semantic or raw area entities from the HA platforms.
 
-    The function name is retained because this dynamic entity module was
-    introduced while the area values were read-only sensors. The sensor
-    platform still imports it during the transition, but writable area entities
-    must only be registered by the number platform.
+    The number platform registers validated model-specific writable mappings.
+    The sensor platform registers raw diagnostic values when no semantic
+    mapping exists for an explicitly enabled area-protocol class.
     """
-    if not number_platform:
+    controller = config_entry.runtime_data
+    if number_platform:
+        for device in controller.devices:
+            if device.capabilities.device_type is not DeviceType.MOWER:
+                continue
+            profile = profile_for_class(device.device_info["class"])
+            if profile is None or not profile.area_parameters:
+                continue
+            area_mapping = AREA_PARAMETER_MAPPINGS.get(profile.device_class)
+            if area_mapping is None:
+                continue
+            _setup_device_area_sensors(
+                device, config_entry, async_add_entities, area_mapping
+            )
         return
 
-    controller = config_entry.runtime_data
     for device in controller.devices:
         if device.capabilities.device_type is not DeviceType.MOWER:
             continue
         profile = profile_for_class(device.device_info["class"])
         if profile is None or not profile.area_parameters:
             continue
-        area_mapping = AREA_PARAMETER_MAPPINGS.get(profile.device_class)
-        if area_mapping is None:
+        if AREA_PARAMETER_MAPPINGS.get(profile.device_class) is not None:
             continue
-        _setup_device_area_sensors(
-            device, config_entry, async_add_entities, area_mapping
-        )
+        _setup_device_raw_area_sensors(device, config_entry, async_add_entities)
 
 
 def _setup_device_area_sensors(
@@ -524,4 +628,48 @@ def _setup_device_area_sensors(
     config_entry.async_on_unload(
         device.events.subscribe(MowerAreaEvent, on_area_state)
     )
+    device.events.request_refresh(MowerAreaEvent)
+
+
+def _setup_device_raw_area_sensors(
+    device: Device,
+    config_entry: EcovacsMowerConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Project patch-owned raw area state into diagnostic sensor entities."""
+    entities: dict[str, list[EcovacsAreaRawSensor]] = {}
+
+    def add_area(area: MowerArea) -> None:
+        """Create the four raw sensors for a newly discovered area."""
+        if area.area_id in entities:
+            return
+        name = area.name or f"Area {area.area_id}"
+        area_entities = [
+            EcovacsAreaRawSensor(device, area.area_id, description, name)
+            for description in area_raw_sensor_descriptions(area.area_id)
+        ]
+        entities[area.area_id] = area_entities
+        for entity in area_entities:
+            entity._attr_native_value = entity.entity_description.value_fn(area)
+        async_add_entities(area_entities)
+
+    async def on_area_state(event: MowerAreaEvent) -> None:
+        """Create missing sensors and project the new authoritative state."""
+        reported_ids = {area.area_id for area in event.areas}
+        for area in event.areas:
+            if area.area_id not in entities:
+                add_area(area)
+            else:
+                for entity in entities[area.area_id]:
+                    entity._attr_native_value = entity.entity_description.value_fn(area)
+                    if area.name:
+                        entity.set_area_name(area.name)
+                    entity.async_write_ha_state()
+        for area_id, area_entities in entities.items():
+            if area_id not in reported_ids:
+                for entity in area_entities:
+                    entity._attr_native_value = None
+                    entity.async_write_ha_state()
+
+    config_entry.async_on_unload(device.events.subscribe(MowerAreaEvent, on_area_state))
     device.events.request_refresh(MowerAreaEvent)

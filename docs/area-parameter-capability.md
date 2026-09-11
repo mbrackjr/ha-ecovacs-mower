@@ -1,6 +1,6 @@
 # Area-parameter capability
 
-This PR adds read/write support for per-area mowing parameters on the A1600 LiDAR Pro (`e4gqia`). The mower identifies an area by `areaID`; its friendly name and its parameter values arrive through separate protocol responses.
+This PR adds shared raw area protocol support plus read/write semantic support for per-area mowing parameters on the A1600 LiDAR Pro (`e4gqia`). The mower identifies an area by `areaID`; its friendly name and its parameter values arrive through separate protocol responses.
 
 ## Functional flow
 
@@ -27,17 +27,16 @@ These commands live in `deebot_patch/commands.py`, alongside the other patched p
 
 For a write, HA converts the requested value back to its raw representation, combines it with the other three raw values from the authoritative snapshot, and sends one complete `SetAreaParameter`. The entity does not update its state optimistically; the mower must report the resulting raw values through the normal refresh path.
 
-The capability is exposed only for `e4gqia`. Other supported mower models do not receive these entities merely because they use the same protocol field names.
+The protocol capability is exposed only for classes explicitly marked `area_parameters=True` in `SUPPORTED_CLASSES`. The semantic A1600 mapping is exposed only for `e4gqia`. A class with the protocol capability but no validated semantic mapping gets four read-only diagnostic sensors per area instead: the exact raw `mowHeightLevel`, `cutMode`, `obstacleHeight`, and `angle` values. Those sensors have no units, ranges, steps, or conversions and never write to the mower. A class without the explicit protocol capability receives neither the area commands nor the raw sensors.
 
 ## Adding another mower model
 
-A future model should be added only after its area protocol has been independently verified. In particular, verify:
+A future model should be investigated in two stages. First establish the protocol capability and add `area_parameters=True` for that class only when the request/response shape is confirmed. This enables raw diagnostic collection without asserting what the values mean. Capture the mower class, firmware, area IDs/names, and all four raw values from several areas and settings. Then, separately verify:
 
-1. that the model actually supports the area commands and the expected `areaID`/area inventory behavior;
-2. the raw meaning and valid range of each parameter;
-3. the mapping of those raw values to Home Assistant values and back; and
-4. that complete parameter writes are safe with the model's observed payload format.
+1. the raw meaning and valid range of each parameter;
+2. the mapping of those raw values to Home Assistant values and back; and
+3. that complete parameter writes are safe with the model's observed payload format.
 
-Keep the raw protocol handling shared where the wire format is genuinely the same. Add model-specific value mappings in `area_sensors.py` only when they have been validated for that model, and gate the HA capability to that model. Do not assume that an identically named Ecovacs field has identical units, ranges, or semantics on another mower.
+Only after that evidence exists should the model receive an entry in `AREA_PARAMETER_MAPPINGS` and writable semantic entities. Keep the raw protocol handling shared where the wire format is genuinely the same. Do not assume that an identically named Ecovacs field has identical units, ranges, or semantics on another mower.
 
 This keeps the area-parameter capability narrowly scoped: protocol parsing and raw state in `deebot_patch`, model-specific interpretation and HA exposure in `area_sensors.py`, with no unrelated restructuring of existing mower capabilities.

@@ -6,9 +6,9 @@ broken parts and putting the result back, we avoid monkeypatching any function â
 we use the same mechanism the library itself uses.
 
 This module also owns the supported mower-class profiles. The profile records
-only integration capabilities that have been independently validated for a
-specific class; raw protocol parsing remains in the patch layer and
-human-facing interpretation remains in the HA layer.
+integration capabilities that have been independently validated for a
+specific class. Area protocol reads are explicitly gated here; human-facing
+semantic interpretation remains in the HA layer.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class MowerProfile:
-    """Validated integration capabilities for one supported mower class."""
+    """Integration capabilities explicitly enabled for one supported mower class."""
 
     device_class: str
     area_parameters: bool = False
@@ -84,9 +84,9 @@ class MowerProfile:
 #
 # Presence in this mapping means the class is supported by the integration.
 # Capability flags are deliberately narrower: they are enabled only where the
-# corresponding behavior or raw-value semantics have been independently
-# validated on that class. Similar protocol field names on another class are
-# not sufficient evidence to enable a capability there.
+# corresponding behavior or raw protocol support has been independently
+# validated on that class. Semantic mappings are separate and are not implied
+# by the presence of an area protocol capability.
 SUPPORTED_CLASSES: dict[str, MowerProfile] = {
     "2i0fns": MowerProfile("2i0fns"),
     "9bts2s": MowerProfile("9bts2s"),

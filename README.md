@@ -79,9 +79,8 @@ sniffing the traffic again. Much of it already exists in this integration —
 the mowing-progress sensor, the rain-delay switch and number, the volume
 number and the map decoding all cover the same ground — and what remains is:
 
-- [DeebotUniverse/client.py#1774](https://github.com/DeebotUniverse/client.py/pull/1774) — the names of the saved mowing areas, from `getAreaSet` with `type: "ar"`. The `mow_area` service here takes area ids only.
 - [DeebotUniverse/client.py#1778](https://github.com/DeebotUniverse/client.py/pull/1778) — the remaining global settings as settable values: animal protection with its schedule, AI recognition, smart mowing with avoidance, narrow-passage adaptation and the lifted-alarm volume. Only the read-only protection flags exist here, as binary sensors.
-- [DeebotUniverse/client.py#1767](https://github.com/DeebotUniverse/client.py/pull/1767) and [#1768](https://github.com/DeebotUniverse/client.py/pull/1768) — per-area cutting height, cut mode, obstacle height and angle via `setAreaParameter`/`onAreaParameter`.
+- [DeebotUniverse/client.py#1767](https://github.com/DeebotUniverse/client.py/pull/1767) and [#1768](https://github.com/DeebotUniverse/client.py/pull/1768) — the upstream work this integration now partially covers: per-area cutting height, cut mode, obstacle height and angle via `setAreaParameter`/`onAreaParameter`. The integration also reads the saved area inventory from `getAreaSet`.
 
 If one of these matters to you, open an issue and say so — that is how the
 order of work here gets decided.
@@ -291,6 +290,31 @@ These parameter mappings are currently confirmed only on the A1600 LiDAR Pro
 but that does not establish that their ranges, units or meanings are the same.
 The integration therefore does not expose these controls on other classes until
 their parameter representation has been independently verified.
+
+#### Collecting raw area parameters on an un-mapped model
+
+The area protocol capability is deliberately separate from the model-specific
+Home Assistant mappings. `SUPPORTED_CLASSES` in
+`custom_components/ecovacs_mower/deebot_patch/hardware.py` is the explicit gate
+for sending `getAreaParameter` and `getAreaSet`. A maintainer should set
+`area_parameters=True` for a supported model only after those wire-level
+requests and responses have been established for that class. Do not enable the
+flag merely because another model uses the same field names.
+
+When a class has `area_parameters=True` but has no validated entry in
+`AREA_PARAMETER_MAPPINGS`, the integration exposes four read-only diagnostic
+sensors per saved area: the raw mowing-height level, raw cut mode, raw obstacle
+height and raw angle. They are captured exactly as reported; they have no unit,
+range, step or semantic conversion. The area identity is the numeric `areaID`,
+and the friendly name comes from `getAreaSet`. Renaming an area updates the
+integration-provided original name without replacing a user's entity-name
+override. An area missing from a later inventory remains as an unknown entity
+rather than being deleted.
+
+For evidence collection, record the mower class and firmware alongside the raw
+sensor values. Those captures are the basis for deciding whether a complete
+model-specific mapping can safely be added later. Raw sensors never send
+`setAreaParameter`.
 
 ### Border mowing
 

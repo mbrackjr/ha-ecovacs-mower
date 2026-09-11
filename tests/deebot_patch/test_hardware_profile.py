@@ -22,8 +22,8 @@ def test_supported_classes_are_capability_profiles() -> None:
     )
 
 
-def test_area_parameters_are_enabled_only_for_validated_class() -> None:
-    """Area-parameter semantics are not inferred from protocol field names."""
+def test_area_parameter_protocol_is_enabled_only_for_explicit_classes() -> None:
+    """Area protocol reads are opt-in per supported mower class."""
     assert profile_for_class("e4gqia") is not None
     assert profile_for_class("e4gqia").area_parameters is True
 
