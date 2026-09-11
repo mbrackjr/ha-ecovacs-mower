@@ -200,7 +200,7 @@ def _area_parameter_refresh_entities(
 ) -> list[EcovacsAreaParameterRefreshButtonEntity]:
     """Build the diagnostic refresh button only for explicitly raw models."""
     return [
-        EcovacsAreaParameterRefreshButtonEntity(device)
+        EcovacsAreaParameterRefreshButtonEntity(device, device.capabilities)
         for device in controller.devices
         if device.capabilities.device_type is DeviceType.MOWER
         and (
