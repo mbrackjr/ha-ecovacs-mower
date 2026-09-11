@@ -39,6 +39,9 @@
       "play_sound": {
         "default": "mdi:map-marker-radius"
       },
+      "refresh_raw_area_parameters": {
+        "default": "mdi:refresh"
+      },
       "reset_lifespan_blade": {
         "default": "mdi:saw-blade"
       },

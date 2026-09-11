@@ -52,11 +52,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
+from .area_sensors import AREA_PARAMETER_MAPPINGS
 from .const import SUPPORTED_LIFESPANS
 from .controller import EcovacsController
+from .deebot_patch.areas import MowerAreaEvent
 from .deebot_patch.border import MowBorder
 from .deebot_patch.commands import CleanMower
-from .deebot_patch.hardware import BORDER_CLASSES
+from .deebot_patch.hardware import BORDER_CLASSES, profile_for_class
 from .deebot_patch.map_messages import MowerMapInfoEvent
 from .deebot_patch.state_precedence import map_id_for
 from .entity import (
@@ -107,6 +109,14 @@ LIFESPAN_ENTITY_DESCRIPTIONS = tuple(
         entity_registry_enabled_default=False,
     )
     for component in SUPPORTED_LIFESPANS
+)
+
+
+AREA_PARAMETER_REFRESH_DESCRIPTION = ButtonEntityDescription(
+    key="refresh_raw_area_parameters",
+    translation_key="refresh_raw_area_parameters",
+    entity_category=EntityCategory.DIAGNOSTIC,
+    entity_registry_enabled_default=False,
 )
 
 
@@ -185,6 +195,22 @@ def _mower_command_entities(
     ]
 
 
+def _area_parameter_refresh_entities(
+    controller: EcovacsController,
+) -> list[EcovacsAreaParameterRefreshButtonEntity]:
+    """Build the diagnostic refresh button only for explicitly raw models."""
+    return [
+        EcovacsAreaParameterRefreshButtonEntity(device)
+        for device in controller.devices
+        if device.capabilities.device_type is DeviceType.MOWER
+        and (
+            profile := profile_for_class(device.device_info["class"])
+        ) is not None
+        and profile.area_parameters
+        and profile.device_class not in AREA_PARAMETER_MAPPINGS
+    ]
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: EcovacsMowerConfigEntry,
@@ -211,6 +237,7 @@ async def async_setup_entry(
         if device.capabilities.device_type is DeviceType.MOWER
     )
     entities.extend(_mower_command_entities(controller))
+    entities.extend(_area_parameter_refresh_entities(controller))
     async_add_entities(entities)
 
 
@@ -279,6 +306,20 @@ class EcovacsClearFaultButtonEntity(
     async def async_press(self) -> None:
         """Press the button."""
         self._latch.clear_by_request()
+
+
+class EcovacsAreaParameterRefreshButtonEntity(
+    EcovacsEntity[Capabilities],
+    ButtonEntity,
+):
+    """Request a fresh raw area-parameter snapshot from the mower."""
+
+    entity_description: ButtonEntityDescription = AREA_PARAMETER_REFRESH_DESCRIPTION
+
+    @override
+    async def async_press(self) -> None:
+        """Request the current area parameters and area inventory."""
+        self._device.events.request_refresh(MowerAreaEvent)
 
 
 class EcovacsMowerCommandButtonEntity(

@@ -35,6 +35,7 @@ def test_every_description_has_a_translation() -> None:
     from pathlib import Path
 
     from custom_components.ecovacs_mower.button import (
+        AREA_PARAMETER_REFRESH_DESCRIPTION,
         ENTITY_DESCRIPTIONS,
         LIFESPAN_ENTITY_DESCRIPTIONS,
     )
@@ -43,7 +44,11 @@ def test_every_description_has_a_translation() -> None:
     strings = json.loads((root / "strings.json").read_text(encoding="utf-8"))
     names = strings["entity"]["button"]
 
-    for description in (*ENTITY_DESCRIPTIONS, *LIFESPAN_ENTITY_DESCRIPTIONS):
+    for description in (
+        *ENTITY_DESCRIPTIONS,
+        *LIFESPAN_ENTITY_DESCRIPTIONS,
+        AREA_PARAMETER_REFRESH_DESCRIPTION,
+    ):
         assert description.translation_key in names, description.key
 
 
@@ -53,6 +58,7 @@ def test_every_button_has_an_icon() -> None:
     from pathlib import Path
 
     from custom_components.ecovacs_mower.button import (
+        AREA_PARAMETER_REFRESH_DESCRIPTION,
         ENTITY_DESCRIPTIONS,
         LIFESPAN_ENTITY_DESCRIPTIONS,
     )
@@ -61,7 +67,11 @@ def test_every_button_has_an_icon() -> None:
     icons = json.loads((root / "icons.json").read_text(encoding="utf-8"))
     names = icons["entity"]["button"]
 
-    for description in (*ENTITY_DESCRIPTIONS, *LIFESPAN_ENTITY_DESCRIPTIONS):
+    for description in (
+        *ENTITY_DESCRIPTIONS,
+        *LIFESPAN_ENTITY_DESCRIPTIONS,
+        AREA_PARAMETER_REFRESH_DESCRIPTION,
+    ):
         assert description.translation_key in names, description.key
 
 
@@ -76,6 +86,7 @@ def test_no_stale_button_translations_or_icons() -> None:
     from pathlib import Path
 
     from custom_components.ecovacs_mower.button import (
+        AREA_PARAMETER_REFRESH_DESCRIPTION,
         ENTITY_DESCRIPTIONS,
         LIFESPAN_ENTITY_DESCRIPTIONS,
         MOWER_COMMAND_DESCRIPTIONS,
@@ -92,6 +103,7 @@ def test_no_stale_button_translations_or_icons() -> None:
             *ENTITY_DESCRIPTIONS,
             *LIFESPAN_ENTITY_DESCRIPTIONS,
             *MOWER_COMMAND_DESCRIPTIONS,
+            AREA_PARAMETER_REFRESH_DESCRIPTION,
         )
     } | {EcovacsClearFaultButtonEntity.entity_description.translation_key}
     assert set(strings["entity"]["button"]) <= keys
