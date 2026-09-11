@@ -114,9 +114,10 @@ LIFESPAN_ENTITY_DESCRIPTIONS = tuple(
 
 AREA_PARAMETER_REFRESH_DESCRIPTION = ButtonEntityDescription(
     key="refresh_raw_area_parameters",
+    name="Refresh raw area parameters",
     translation_key="refresh_raw_area_parameters",
     entity_category=EntityCategory.DIAGNOSTIC,
-    entity_registry_enabled_default=False,
+    entity_registry_enabled_default=True,
 )
 
 
