@@ -5,7 +5,7 @@ from tests import requires_ha
 pytestmark = requires_ha
 
 
-def test_raw_area_parameter_refresh_button_is_diagnostic_and_disabled_by_default() -> None:
+def test_raw_area_parameter_refresh_button_is_diagnostic_and_enabled_by_default() -> None:
     from homeassistant.const import EntityCategory
 
     from custom_components.ecovacs_mower.button import (
@@ -13,13 +13,12 @@ def test_raw_area_parameter_refresh_button_is_diagnostic_and_disabled_by_default
     )
 
     assert AREA_PARAMETER_REFRESH_DESCRIPTION.key == "refresh_raw_area_parameters"
+    assert AREA_PARAMETER_REFRESH_DESCRIPTION.name == "Refresh raw area parameters"
     assert (
         AREA_PARAMETER_REFRESH_DESCRIPTION.entity_category
         is EntityCategory.DIAGNOSTIC
     )
-    assert (
-        AREA_PARAMETER_REFRESH_DESCRIPTION.entity_registry_enabled_default is False
-    )
+    assert AREA_PARAMETER_REFRESH_DESCRIPTION.entity_registry_enabled_default is True
 
 
 def test_raw_area_parameter_refresh_button_is_only_built_for_unmapped_area_models() -> None:
