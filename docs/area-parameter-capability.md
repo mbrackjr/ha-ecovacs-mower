@@ -1,6 +1,6 @@
 # Area-parameter capability
 
-This PR adds shared raw area protocol support plus read/write semantic support for per-area mowing parameters on the A1600 LiDAR Pro (`e4gqia`). The mower identifies an area by `areaID`; its friendly name and its parameter values arrive through separate protocol responses.
+This integration provides shared raw area protocol support plus read/write semantic support for per-area mowing parameters on the A1600 LiDAR Pro (`e4gqia`). The mower identifies an area by `areaID`; its friendly name and its parameter values arrive through separate protocol responses.
 
 ## Functional flow
 
