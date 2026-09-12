@@ -117,6 +117,13 @@ AREA_PARAMETER_REFRESH_DESCRIPTION = ButtonEntityDescription(
     name="Refresh raw area parameters",
     translation_key="refresh_raw_area_parameters",
     entity_category=EntityCategory.DIAGNOSTIC,
+    # Unlike the other diagnostic entities in this integration, this one is
+    # enabled by default: it only exists on classes with area_parameters=True
+    # but no validated AREA_PARAMETER_MAPPINGS entry (see
+    # _area_parameter_refresh_entities), where it is created alongside the
+    # four raw area sensors it refreshes. Those sensors are meaningless
+    # without a way to trigger the read, so the button ships visible with
+    # them rather than requiring a second manual enable step.
     entity_registry_enabled_default=True,
 )
 
