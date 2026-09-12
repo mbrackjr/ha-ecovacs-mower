@@ -537,10 +537,10 @@ async def async_setup_area_sensors(
                     device,
                     config_entry,
                     async_add_entities,
-                    lambda area_id, area_name: [
-                        EcovacsAreaNumber(device, area_id, description, area_name)
+                    lambda area_id, area_name, dev=device, mapping=area_mapping: [
+                        EcovacsAreaNumber(dev, area_id, description, area_name)
                         for description in area_sensor_descriptions(
-                            area_id, area_mapping=area_mapping
+                            area_id, area_mapping=mapping
                         )
                     ],
                 )
@@ -551,7 +551,7 @@ async def async_setup_area_sensors(
                 device,
                 config_entry,
                 async_add_entities,
-                lambda area_id, area_name: [
+                lambda area_id, area_name, device=device: [
                     EcovacsAreaRawSensor(device, area_id, description, area_name)
                     for description in area_raw_sensor_descriptions(area_id)
                 ],
