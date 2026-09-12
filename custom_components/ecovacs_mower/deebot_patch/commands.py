@@ -66,6 +66,7 @@ from deebot_client.const import DataType
 from deebot_client.events import LifeSpan, StateEvent
 from deebot_client.message import HandlingResult, HandlingState
 from deebot_client.models import CleanAction, CleanMode, State
+import orjson
 
 from .areas import MowerArea, _AreaSetFragmentBuffer, _areas_for, _as_int, _notify
 from .families import Family, commit, note_attempt, selected
@@ -785,8 +786,6 @@ class GetAreaSet(CustomCommand):
         if blob is None:
             return HandlingResult.success()
         try:
-            import orjson
-
             decoded = orjson.loads(blob)
         except (orjson.JSONDecodeError, TypeError):
             _LOGGER.debug("Could not decode getAreaSet payload")
