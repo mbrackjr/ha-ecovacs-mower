@@ -28,8 +28,20 @@ from .commands import (
     has_family,
 )
 from .families import attempted_family_name
-from .hardware import SUPPORTED_CLASSES, ZONE_AREA_CLASSES, patch_device_info, profile_for_class
-from .map_messages import OnArI, OnMapInfo, OnMapTrace, OnMapTrack, OnMI, OnSpecialContour
+from .hardware import (
+    SUPPORTED_CLASSES,
+    ZONE_AREA_CLASSES,
+    patch_device_info,
+    profile_for_class,
+)
+from .map_messages import (
+    OnArI,
+    OnMapInfo,
+    OnMapTrace,
+    OnMapTrack,
+    OnMI,
+    OnSpecialContour,
+)
 from .messages import (
     OnChargeInfo,
     OnChargeState,
@@ -175,7 +187,8 @@ def verify_capabilities(capabilities: Capabilities, class_: str) -> None:
         # mapping deliberately contains both protocol reads; neither command
         # interprets raw values into Home Assistant units.
         area_commands = capabilities.get_refresh_commands(MowerAreaEvent)
-        if [type(command) for command in area_commands] != [GetAreaParameter, GetAreaSet]:
+        expected = [GetAreaParameter, GetAreaSet]
+        if [type(command) for command in area_commands] != expected:
             _fail(
                 f"the area commands for {class_} are "
                 f"{[type(c).__name__ for c in area_commands]} instead of "

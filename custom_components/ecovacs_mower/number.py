@@ -31,7 +31,11 @@ from deebot_client.device import Device
 from deebot_client.events import CutDirectionEvent, VolumeEvent
 from deebot_client.events.base import Event
 
-from homeassistant.components.number import NumberEntity, NumberEntityDescription, NumberMode
+from homeassistant.components.number import (
+    NumberEntity,
+    NumberEntityDescription,
+    NumberMode,
+)
 from homeassistant.const import DEGREE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -105,7 +109,9 @@ async def async_setup_entry(
     )
     if entities:
         async_add_entities(entities)
-    await async_setup_area_sensors(config_entry, async_add_entities, number_platform=True)
+    await async_setup_area_sensors(
+        config_entry, async_add_entities, number_platform=True
+    )
 
 
 class EcovacsNumberEntity[EventT: Event](
