@@ -279,12 +279,14 @@ integration refuses the write rather than guessing the missing values. The
 entity state is also not changed optimistically: Home Assistant reflects the
 value reported back by the mower.
 
-Changes made in the Ecovacs phone app are not updated live in Home Assistant.
-There is currently no push or pull mechanism available or implemented for
-those area names or parameters. Reloading the integration, or restarting Home
-Assistant, refreshes the saved area name and all four parameter values from the
-mower. Changes made from Home Assistant are sent to the mower immediately and
-are directly visible in the Ecovacs app.
+Changes made in the Ecovacs phone app are not pushed to Home Assistant live.
+There is no automatic polling for these entities. Reloading the integration,
+or restarting Home Assistant, refreshes the saved area name and all four
+parameter values from the mower — and so does manually calling Home
+Assistant's "Update entity" action (`homeassistant.update_entity`) on any of
+the area entities, without needing a reload. Changes made from Home Assistant
+are sent to the mower immediately and are directly visible in the Ecovacs
+app.
 
 These parameter mappings are currently confirmed only on the A1600 LiDAR Pro
 (`e4gqia`). The raw Ecovacs fields have the same names on other mower models,
