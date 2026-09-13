@@ -258,3 +258,43 @@ def test_set_area_parameter_sends_the_complete_raw_payload() -> None:
         "obstacleHeight": 15,
         "angle": 270,
     }
+
+
+def test_on_area_parameter_command_shape() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.messages import OnAreaParameter
+
+    assert OnAreaParameter.NAME == "onAreaParameter"
+
+
+def test_on_area_parameter_applies_the_push_the_same_way_as_the_get_answer() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.messages import OnAreaParameter
+
+    event_bus = Mock()
+    data = {
+        "areaParameters": [
+            {
+                "areaID": "3",
+                "mowHeightLevel": 6,
+                "cutMode": 7,
+                "obstacleHeight": 3,
+                "angle": 227,
+            }
+        ]
+    }
+
+    result = OnAreaParameter._handle_body_data_dict(event_bus, data)
+
+    assert _areas_for(event_bus)["3"].obstacle_height == 3
+    assert result.state is HandlingState.SUCCESS
+    event_bus.notify.assert_called_once()
+
+
+def test_on_area_parameter_rejects_a_missing_areaParameters_key() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.messages import OnAreaParameter
+
+    event_bus = Mock()
+
+    result = OnAreaParameter._handle_body_data_dict(event_bus, {})
+
+    assert result.state is HandlingState.ANALYSE
+    event_bus.notify.assert_not_called()
