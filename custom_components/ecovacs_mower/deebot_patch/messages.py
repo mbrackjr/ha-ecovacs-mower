@@ -1032,15 +1032,18 @@ class OnRainDelay(MessageBodyDataDict):
 
 
 class OnAreaParameter(MessageBodyDataDict):
-    """The mower's own confirmation push after a setAreaParameter write.
+    """The mower's broadcast of its current area parameters, unsolicited.
 
     Carries the same ``areaParameters`` list as ``getAreaParameter``'s
     answer, parsed identically via ``apply_area_parameters`` — see that
     function for why the two cannot each have their own copy.
 
-    Observed arriving roughly 150ms after a ``setAreaParameter`` write,
-    well before the client's own explicit post-write refresh (a
-    ``getAreaParameter`` plus a multipart ``getAreaSet``) completes.
+    Sent to every connected MQTT client whenever an area's parameters
+    change, not only to whoever changed them — confirmed for both a
+    ``setAreaParameter`` write issued from Home Assistant and a change made
+    in the Ecovacs app, typically arriving within a couple hundred
+    milliseconds, well before the client's own explicit post-write refresh
+    (a ``getAreaParameter`` plus a multipart ``getAreaSet``) completes.
     Registering this push is what closes most of the window in which a
     second fast write to the same area would otherwise still see the
     pre-write snapshot. ``setAreaParameter`` itself does not support MQTT

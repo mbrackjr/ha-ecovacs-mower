@@ -283,18 +283,16 @@ integration refuses the write rather than guessing the missing values. The
 entity state is also not changed optimistically: Home Assistant reflects the
 value reported back by the mower.
 
-Whether a change made in the Ecovacs phone app pushes live to Home Assistant
-has not been tested. There is no automatic polling for these entities either
-way. Reloading the integration, or restarting Home Assistant, refreshes the
-saved area name and all four parameter values from the mower — and so does
-manually calling Home Assistant's "Update entity" action
-(`homeassistant.update_entity`) on any of the area entities, without needing
-a reload.
-
-Changes made from Home Assistant are different: they are sent to the mower
-immediately and are directly visible in the Ecovacs app, and the mower's own
-confirmation typically reaches Home Assistant back within a couple hundred
-milliseconds, well before any manual refresh — no action needed on your part.
+Changes made anywhere — the Ecovacs app or Home Assistant — reach the other
+within a couple hundred milliseconds, confirmed both directions. The mower
+broadcasts its current area parameters to every connected client whenever
+they change, not just to whoever made the change, and this integration
+listens for that broadcast. There is no polling involved; nothing needs a
+manual refresh for this to work. Reloading the integration, or restarting
+Home Assistant, still refreshes the saved area name and all four parameter
+values from the mower as a fallback — and so does manually calling Home
+Assistant's "Update entity" action (`homeassistant.update_entity`) on any of
+the area entities, without needing a reload.
 
 These parameter mappings are currently confirmed only on the A1600 LiDAR Pro
 (`e4gqia`). The raw Ecovacs fields have the same names on other mower models,
