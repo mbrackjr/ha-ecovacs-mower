@@ -67,7 +67,13 @@ from deebot_client.events import LifeSpan, StateEvent
 from deebot_client.message import HandlingResult, HandlingState
 from deebot_client.models import CleanAction, CleanMode, State
 
-from .areas import MowerArea, _AreaSetFragmentBuffer, _areas_for, _as_int, _notify
+from .areas import (
+    MowerArea,
+    _AreaSetFragmentBuffer,
+    _areas_for,
+    _notify,
+    apply_area_parameters,
+)
 from .families import Family, commit, note_attempt, selected
 from .messages import (
     BEACON_COMPONENT,
@@ -732,24 +738,8 @@ class GetAreaParameter(CustomCommand):
         except (KeyError, TypeError):
             _LOGGER.debug("Unexpected getAreaParameter response: %r", response)
             return HandlingResult.analyse()
-        if not isinstance(parameters, list):
+        if not apply_area_parameters(event_bus, parameters):
             return HandlingResult.analyse()
-
-        areas = _areas_for(event_bus)
-        for parameter in parameters:
-            if not isinstance(parameter, dict) or parameter.get("areaID") is None:
-                continue
-            area_id = str(parameter["areaID"])
-            current = areas.get(area_id, MowerArea(area_id))
-            areas[area_id] = MowerArea(
-                area_id=current.area_id,
-                name=current.name,
-                mow_height_level=_as_int(parameter.get("mowHeightLevel")),
-                cut_mode=_as_int(parameter.get("cutMode")),
-                obstacle_height=_as_int(parameter.get("obstacleHeight")),
-                angle=_as_int(parameter.get("angle")),
-            )
-        _notify(event_bus)
         return HandlingResult.success()
 
 

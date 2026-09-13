@@ -31,6 +31,7 @@ from .families import attempted_family_name
 from .hardware import SUPPORTED_CLASSES, ZONE_AREA_CLASSES, patch_device_info, profile_for_class
 from .map_messages import OnArI, OnMapInfo, OnMapTrace, OnMapTrack, OnMI, OnSpecialContour
 from .messages import (
+    OnAreaParameter,
     OnChargeInfo,
     OnChargeState,
     OnCleanInfo,
@@ -99,6 +100,7 @@ def apply() -> None:
     # Mutated in place: messages/__init__.py holds a reference to the same
     # object, so a rebinding would not be visible in get_message().
     for message in (
+        OnAreaParameter,
         OnChargeInfo,
         OnChargeState,
         OnCleanInfo,

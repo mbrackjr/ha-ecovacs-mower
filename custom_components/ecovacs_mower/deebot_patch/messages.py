@@ -86,6 +86,7 @@ from deebot_client.messages.json.stats import OnStats
 from deebot_client.models import State
 from deebot_client.rs.map import PositionType
 
+from .areas import apply_area_parameters
 from .state_precedence import record_for
 
 if TYPE_CHECKING:
@@ -1027,6 +1028,35 @@ class OnRainDelay(MessageBodyDataDict):
             delay = None
 
         event_bus.notify(MowerRainDelayEvent(enabled=bool(enable), delay=delay))
+        return HandlingResult.success()
+
+
+class OnAreaParameter(MessageBodyDataDict):
+    """The mower's own confirmation push after a setAreaParameter write.
+
+    Carries the same ``areaParameters`` list as ``getAreaParameter``'s
+    answer, parsed identically via ``apply_area_parameters`` — see that
+    function for why the two cannot each have their own copy.
+
+    Observed arriving roughly 150ms after a ``setAreaParameter`` write,
+    well before the client's own explicit post-write refresh (a
+    ``getAreaParameter`` plus a multipart ``getAreaSet``) completes.
+    Registering this push is what closes most of the window in which a
+    second fast write to the same area would otherwise still see the
+    pre-write snapshot. ``setAreaParameter`` itself does not support MQTT
+    p2p echo handling, which is why this relies on the ``onAreaParameter``
+    push rather than deebot-client's usual set/get pairing.
+    """
+
+    NAME = "onAreaParameter"
+
+    @classmethod
+    def _handle_body_data_dict(
+        cls, event_bus: EventBus, data: dict[str, Any]
+    ) -> HandlingResult:
+        """Handle message->body->data."""
+        if not apply_area_parameters(event_bus, data.get("areaParameters")):
+            return HandlingResult.analyse()
         return HandlingResult.success()
 
 
