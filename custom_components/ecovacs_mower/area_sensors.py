@@ -12,10 +12,13 @@ to that model: the values have not been verified on the other mower classes
 supported by this integration.
 
 The four parameter views are writable on the validated A1600 model. Each write
-is converted back to raw protocol values and merged with the other three values
-from the authoritative area snapshot before one complete ``setAreaParameter``
-command is sent. The entity state is not updated optimistically; the mower must
-report the resulting raw values through the normal area refresh.
+is converted back to raw protocol values and merged with the other three
+values — from the area's last confirmed snapshot, or from this area's own
+not-yet-confirmed write if one is in flight (see ``_PendingAreaWrite``) —
+before one complete ``setAreaParameter`` command is sent. The entity state is
+not updated optimistically; the mower must report the resulting raw values
+back, whether through the unsolicited ``onAreaParameter`` push a write
+normally triggers within milliseconds, or through the polled area refresh.
 """
 
 from __future__ import annotations
@@ -252,6 +255,13 @@ class _PendingAreaWrite:
     snapshot, which may still be in flight — otherwise a second fast write
     to a different field would silently revert the first. It is cleared once
     a fresh ``MowerAreaEvent`` is received for the area.
+
+    In practice the mower's ``onAreaParameter`` push (see
+    ``deebot_patch.messages.OnAreaParameter``) confirms a write and clears
+    this within roughly 150ms, well before a person could plausibly make a
+    second change by hand. This class is what covers the remaining gap: two
+    writes issued programmatically with no delay, or a mower/firmware that
+    does not send that push.
     """
 
     raw_values: dict[str, int | None] | None = None
