@@ -81,7 +81,6 @@ number and the map decoding all cover the same ground — and what remains is:
 
 - [DeebotUniverse/client.py#1774](https://github.com/DeebotUniverse/client.py/pull/1774) — the names of the saved mowing areas, from `getAreaSet` with `type: "ar"`. The `mow_area` service here takes area ids only.
 - [DeebotUniverse/client.py#1778](https://github.com/DeebotUniverse/client.py/pull/1778) — the remaining global settings as settable values: animal protection with its schedule, AI recognition, smart mowing with avoidance, narrow-passage adaptation and the lifted-alarm volume. Only the read-only protection flags exist here, as binary sensors.
-- [DeebotUniverse/client.py#1767](https://github.com/DeebotUniverse/client.py/pull/1767) and [#1768](https://github.com/DeebotUniverse/client.py/pull/1768) — per-area cutting height, cut mode, obstacle height and angle via `setAreaParameter`/`onAreaParameter`.
 
 If one of these matters to you, open an issue and say so — that is how the
 order of work here gets decided.
@@ -268,6 +267,11 @@ The entities use the numeric `areaID` for their identity, not the area's name.
 The name shown by the mower is user-editable in the Ecovacs app, so changing
 it does not create a new Home Assistant entity.
 
+If an area is removed from the mower — deleted or re-mapped away — its four
+entities become unavailable rather than disappearing or showing a stale
+value. They recover automatically if an area with the same ID is reported
+again.
+
 The settings are read from the mower with `getAreaParameter` and `getAreaSet`.
 The integration combines those responses into one authoritative area snapshot,
 so a write can preserve the other settings. Changing one value therefore sends
@@ -279,12 +283,16 @@ integration refuses the write rather than guessing the missing values. The
 entity state is also not changed optimistically: Home Assistant reflects the
 value reported back by the mower.
 
-Changes made in the Ecovacs phone app are not updated live in Home Assistant.
-There is currently no push or pull mechanism available or implemented for
-those area names or parameters. Reloading the integration, or restarting Home
-Assistant, refreshes the saved area name and all four parameter values from the
-mower. Changes made from Home Assistant are sent to the mower immediately and
-are directly visible in the Ecovacs app.
+Changes made anywhere — the Ecovacs app or Home Assistant — reach the other
+within a couple hundred milliseconds, confirmed both directions. The mower
+broadcasts its current area parameters to every connected client whenever
+they change, not just to whoever made the change, and this integration
+listens for that broadcast. There is no polling involved; nothing needs a
+manual refresh for this to work. Reloading the integration, or restarting
+Home Assistant, still refreshes the saved area name and all four parameter
+values from the mower as a fallback — and so does manually calling Home
+Assistant's "Update entity" action (`homeassistant.update_entity`) on any of
+the area entities, without needing a reload.
 
 These parameter mappings are currently confirmed only on the A1600 LiDAR Pro
 (`e4gqia`). The raw Ecovacs fields have the same names on other mower models,

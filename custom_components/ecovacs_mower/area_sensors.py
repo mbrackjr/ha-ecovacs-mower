@@ -12,10 +12,13 @@ to that model: the values have not been verified on the other mower classes
 supported by this integration.
 
 The four parameter views are writable on the validated A1600 model. Each write
-is converted back to raw protocol values and merged with the other three values
-from the authoritative area snapshot before one complete ``setAreaParameter``
-command is sent. The entity state is not updated optimistically; the mower must
-report the resulting raw values through the normal area refresh.
+is converted back to raw protocol values and merged with the other three
+values — from the area's last confirmed snapshot, or from this area's own
+not-yet-confirmed write if one is in flight (see ``_PendingAreaWrite``) —
+before one complete ``setAreaParameter`` command is sent. The entity state is
+not updated optimistically; the mower must report the resulting raw values
+back, whether through the unsolicited ``onAreaParameter`` push a write
+normally triggers within milliseconds, or through the polled area refresh.
 """
 
 from __future__ import annotations
@@ -206,42 +209,62 @@ AREA_PARAMETER_MAPPINGS: dict[str, AreaParameterMapping] = {
 }
 
 
-def build_set_area_parameter(
-    area: MowerArea, raw_field: str, raw_value: int
-) -> SetAreaParameter | None:
-    """Merge one raw change into a complete authoritative area write.
-
-    The mower requires all five raw values. Returning no command for an
-    incomplete snapshot prevents a writable HA entity from inventing defaults
-    for fields that have not been reported by the mower yet.
-    """
-    if any(
-        parameter is None
-        for parameter in (
-            area.mow_height_level,
-            area.cut_mode,
-            area.obstacle_height,
-            area.angle,
-        )
-    ):
-        return None
-
-    raw_values = {
+def _raw_values_of(area: MowerArea) -> dict[str, int | None]:
+    """Return one area's four raw parameter values as a plain mapping."""
+    return {
         "mow_height_level": area.mow_height_level,
         "cut_mode": area.cut_mode,
         "obstacle_height": area.obstacle_height,
         "angle": area.angle,
     }
+
+
+def build_set_area_parameter(
+    area_id: str, raw_values: dict[str, int | None], raw_field: str, raw_value: int
+) -> SetAreaParameter | None:
+    """Merge one raw change into a complete area write.
+
+    ``raw_values`` is either the mower's last confirmed snapshot or this
+    area's not-yet-confirmed pending write — see ``_PendingAreaWrite``. The
+    mower requires all four raw values. Returning no command for an
+    incomplete snapshot prevents a writable HA entity from inventing defaults
+    for fields that have not been reported by the mower yet.
+    """
     if raw_field not in raw_values:
         return None
-    raw_values[raw_field] = raw_value
+    if any(parameter is None for parameter in raw_values.values()):
+        return None
+
+    merged = {**raw_values, raw_field: raw_value}
     return SetAreaParameter(
-        area_id=area.area_id,
-        mow_height_level=raw_values["mow_height_level"],
-        cut_mode=raw_values["cut_mode"],
-        obstacle_height=raw_values["obstacle_height"],
-        angle=raw_values["angle"],
+        area_id=area_id,
+        mow_height_level=merged["mow_height_level"],
+        cut_mode=merged["cut_mode"],
+        obstacle_height=merged["obstacle_height"],
+        angle=merged["angle"],
     )
+
+
+@dataclass
+class _PendingAreaWrite:
+    """Tracks one area's most recent unconfirmed write.
+
+    Shared by all four ``EcovacsAreaNumber`` entities of one area. Once set,
+    ``raw_values`` holds the complete four-value payload just sent to the
+    mower; the next write merges against it instead of the last *confirmed*
+    snapshot, which may still be in flight — otherwise a second fast write
+    to a different field would silently revert the first. It is cleared once
+    a fresh ``MowerAreaEvent`` is received for the area.
+
+    In practice the mower's ``onAreaParameter`` push (see
+    ``deebot_patch.messages.OnAreaParameter``) confirms a write and clears
+    this within roughly 150ms, well before a person could plausibly make a
+    second change by hand. This class is what covers the remaining gap: two
+    writes issued programmatically with no delay, or a mower/firmware that
+    does not send that push.
+    """
+
+    raw_values: dict[str, int | None] | None = None
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -362,12 +385,25 @@ class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
         area_id: str,
         description: EcovacsAreaNumberEntityDescription,
         area_name: str,
+        pending: _PendingAreaWrite,
     ) -> None:
         """Initialize the dynamic area entity."""
         super().__init__(device, device.capabilities, description)
         self._area_id = area_id
+        self._area_present = True
+        self._pending = pending
         self._set_area_name(area_name)
         self._attr_icon = description.icon
+
+    @property
+    @override
+    def available(self) -> bool:
+        """Combine device availability with this area still being reported.
+
+        A removed area must not remain a live, writable control just because
+        the device itself is still online.
+        """
+        return self._attr_available and self._area_present
 
     def _set_area_name(self, area_name: str) -> None:
         """Set the integration-provided name without changing identity."""
@@ -424,14 +460,18 @@ class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
                 "cannot be represented by this mower"
             )
 
-        area = area_for(self._device.events, self._area_id)
-        if area is None:
-            raise HomeAssistantError(
-                f"Area {self._area_id} has not reported its parameters yet"
-            )
+        if self._pending.raw_values is not None:
+            current = self._pending.raw_values
+        else:
+            area = area_for(self._device.events, self._area_id)
+            if area is None:
+                raise HomeAssistantError(
+                    f"Area {self._area_id} has not reported its parameters yet"
+                )
+            current = _raw_values_of(area)
 
         command = build_set_area_parameter(
-            area, self.entity_description.raw_field, raw_value
+            self._area_id, current, self.entity_description.raw_field, raw_value
         )
         if command is None:
             raise HomeAssistantError(
@@ -440,6 +480,11 @@ class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
             )
 
         await self._execute_command(command)
+        self._pending.raw_values = {
+            **current,
+            self.entity_description.raw_field: raw_value,
+        }
+
         self._device.events.request_refresh(MowerAreaEvent)
 
 
@@ -482,14 +527,16 @@ def _setup_device_area_sensors(
 ) -> None:
     """Project the patch-owned area state into dynamic HA entities."""
     entities: dict[str, list[EcovacsAreaNumber]] = {}
+    pending: dict[str, _PendingAreaWrite] = {}
 
     def add_area(area: MowerArea) -> None:
         """Create the four entities for a newly discovered area."""
         if area.area_id in entities:
             return
         name = area.name or f"Area {area.area_id}"
+        area_pending = pending.setdefault(area.area_id, _PendingAreaWrite())
         area_entities = [
-            EcovacsAreaNumber(device, area.area_id, description, name)
+            EcovacsAreaNumber(device, area.area_id, description, name, area_pending)
             for description in area_sensor_descriptions(
                 area.area_id, area_mapping=area_mapping
             )
@@ -506,7 +553,10 @@ def _setup_device_area_sensors(
             if area.area_id not in entities:
                 add_area(area)
             else:
+                # A fresh snapshot supersedes any write still in flight.
+                pending[area.area_id].raw_values = None
                 for entity in entities[area.area_id]:
+                    entity._area_present = True
                     entity._attr_native_value = entity.entity_description.value_fn(area)
                     if area.name:
                         entity.set_area_name(area.name)
@@ -518,10 +568,10 @@ def _setup_device_area_sensors(
         for area_id, area_entities in entities.items():
             if area_id not in reported_ids:
                 for entity in area_entities:
+                    entity._area_present = False
                     entity._attr_native_value = None
                     entity.async_write_ha_state()
 
     config_entry.async_on_unload(
         device.events.subscribe(MowerAreaEvent, on_area_state)
     )
-    device.events.request_refresh(MowerAreaEvent)

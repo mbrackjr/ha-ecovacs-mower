@@ -79,6 +79,35 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+def apply_area_parameters(event_bus: EventBus, parameters: Any) -> bool:
+    """Merge a getAreaParameter/onAreaParameter payload into area state.
+
+    Both ``GetAreaParameter``'s answer and the mower's unsolicited
+    ``onAreaParameter`` push carry an identical ``areaParameters`` list and
+    must parse it identically — a copy would drift the day the payload gains
+    a field. Returns whether ``parameters`` was even a usable list; a bad row
+    inside a good list is skipped, not rejected outright.
+    """
+    if not isinstance(parameters, list):
+        return False
+    areas = _areas_for(event_bus)
+    for parameter in parameters:
+        if not isinstance(parameter, dict) or parameter.get("areaID") is None:
+            continue
+        area_id = str(parameter["areaID"])
+        current = areas.get(area_id, MowerArea(area_id))
+        areas[area_id] = MowerArea(
+            area_id=current.area_id,
+            name=current.name,
+            mow_height_level=_as_int(parameter.get("mowHeightLevel")),
+            cut_mode=_as_int(parameter.get("cutMode")),
+            obstacle_height=_as_int(parameter.get("obstacleHeight")),
+            angle=_as_int(parameter.get("angle")),
+        )
+    _notify(event_bus)
+    return True
+
+
 class _AreaSetFragmentBuffer:
     """Reassemble multipart area-set data using deebot-client's decoder."""
 
@@ -122,6 +151,7 @@ def reset() -> None:
 __all__ = [
     "MowerArea",
     "MowerAreaEvent",
+    "apply_area_parameters",
     "area_for",
     "reset",
 ]
