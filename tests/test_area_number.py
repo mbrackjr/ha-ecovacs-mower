@@ -75,10 +75,10 @@ def test_build_set_area_parameter_merges_the_other_three_values() -> None:
         "angle": 90,
     }
     command = build_set_area_parameter("12", current, "cut_mode", 2)
-    assert command.mow_height_level == 7
-    assert command.cut_mode == 2
-    assert command.obstacle_height == 15
-    assert command.angle == 90
+    assert command._args["mowHeightLevel"] == 7
+    assert command._args["cutMode"] == 2
+    assert command._args["obstacleHeight"] == 15
+    assert command._args["angle"] == 90
 
 
 async def test_write_raises_when_the_area_has_not_reported_yet() -> None:
@@ -142,8 +142,8 @@ async def test_a_successful_write_sends_one_complete_command_and_refreshes() -> 
 
     entity._execute_command.assert_called_once()
     command = entity._execute_command.call_args[0][0]
-    assert command.mow_height_level == 4  # raw value for 6cm
-    assert command.cut_mode == 4
+    assert command._args["mowHeightLevel"] == 4  # raw value for 6cm
+    assert command._args["cutMode"] == 4
     device.events.request_refresh.assert_called_once()
 
 
@@ -178,8 +178,8 @@ async def test_back_to_back_writes_do_not_revert_each_other() -> None:
     await speed_entity.async_set_native_value(0.55)
 
     second_command = speed_entity._execute_command.call_args[0][0]
-    assert second_command.mow_height_level == 4  # 6cm from the first write
-    assert second_command.cut_mode == 4  # 0.55 m/s
+    assert second_command._args["mowHeightLevel"] == 4  # 6cm from the first write
+    assert second_command._args["cutMode"] == 4  # 0.55 m/s
 
 
 async def test_a_fresh_snapshot_clears_a_pending_write() -> None:
@@ -197,6 +197,8 @@ async def test_a_fresh_snapshot_clears_a_pending_write() -> None:
 
     await on_area_state(MowerAreaEvent((area,)))
     entities = add_entities.call_args[0][0]
+    for entity in entities:
+        entity.async_write_ha_state = MagicMock()
     height_entity = next(
         e for e in entities if e.entity_description.raw_field == "mow_height_level"
     )
