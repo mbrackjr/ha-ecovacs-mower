@@ -84,7 +84,7 @@ from .messages import (
     notify_mower_beacons,
     notify_mower_stats,
 )
-from .state_precedence import record_for
+from .state_precedence import map_id_for, record_for
 
 if TYPE_CHECKING:
     from deebot_client.authentication import Authenticator
@@ -750,8 +750,45 @@ class GetAreaSet(CustomCommand):
     NAME = "getAreaSet"
 
     def __init__(self) -> None:
-        super().__init__(self.NAME, {"mid": "1", "aid": "0", "type": "ar"})
+        super().__init__(self.NAME, {"aid": "0", "type": "ar"})
         self._buffer = _AreaSetFragmentBuffer()
+
+    async def _execute(
+        self,
+        authenticator: Authenticator,
+        device_info: ApiDeviceInfo,
+        event_bus: EventBus,
+    ) -> tuple[HandlingResult, dict[str, Any]]:
+        """Fill in the mower's current map id before sending, not before.
+
+        ``mid`` cannot be baked in at construction time: this command is
+        registered once, in ``hardware.py``'s ``MowerAreaEvent`` refresh
+        mapping, before any device has connected — and unlike that mapping,
+        which is fixed for the class's lifetime, the mower's active map id
+        can change later, e.g. after a relearn (see
+        ``state_precedence.note_map``). Reading it fresh on every send, on
+        this one long-lived instance, is what keeps it correct across that
+        change — see ``docs/area-parameter-capability.md``'s "Map identity"
+        section (PR #97).
+
+        If the map id is not known yet — plausible at cold start, since
+        entity-platform setup and the map subscription in
+        ``EcovacsController._setup_map`` are not ordered relative to each
+        other — this skips sending rather than asking with a guessed or
+        empty id. Nothing currently re-triggers this refresh once the map
+        id becomes known; the areas populate on the next trigger of
+        ``MowerAreaEvent`` (an area write, a manual entity update, or a
+        reload), the same fallback the README already documents for area
+        names generally.
+        """
+        map_id = map_id_for(event_bus)
+        if not map_id:
+            _LOGGER.debug(
+                "Skipping getAreaSet: the mower's active map id is not known yet"
+            )
+            return HandlingResult.analyse(), {}
+        self._args = {"mid": map_id, "aid": "0", "type": "ar"}
+        return await super()._execute(authenticator, device_info, event_bus)
 
     def _handle_response(
         self, event_bus: Any, response: dict[str, Any]

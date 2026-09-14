@@ -1,7 +1,8 @@
 """Tests for the area protocol commands: get/set area parameters and area set."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
+from deebot_client.command import Command
 from deebot_client.message import HandlingState
 
 from custom_components.ecovacs_mower.deebot_patch.areas import MowerArea, _areas_for
@@ -10,6 +11,9 @@ from custom_components.ecovacs_mower.deebot_patch.commands import (
     GetAreaSet,
     SetAreaParameter,
 )
+from custom_components.ecovacs_mower.deebot_patch.state_precedence import register
+
+from .test_commands import _DEVICE_INFO, _OK, _bus, _transport
 
 
 def _ok_area_parameter_response(*parameters: dict) -> dict:
@@ -125,7 +129,49 @@ def _multipart_ok_response(*, batid: str = "b1", index: int = 0) -> dict:
 
 def test_get_area_set_command_shape() -> None:
     assert GetAreaSet.NAME == "getAreaSet"
-    assert GetAreaSet()._args == {"mid": "1", "aid": "0", "type": "ar"}
+    # mid is resolved fresh on every send, not at construction — see
+    # test_get_area_set_uses_the_mowers_active_map_id and "Map identity"
+    # in docs/area-parameter-capability.md.
+    assert GetAreaSet()._args == {"aid": "0", "type": "ar"}
+
+
+async def test_get_area_set_uses_the_mowers_active_map_id() -> None:
+    bus = _bus()
+    register(bus).map_id = "3"
+    fake, sent = _transport(_OK)
+    command = GetAreaSet()
+
+    with patch.object(Command, "_execute", fake):
+        await command._execute(AsyncMock(), _DEVICE_INFO, bus)
+
+    assert sent == ["getAreaSet"]
+    assert command._args == {"mid": "3", "aid": "0", "type": "ar"}
+
+
+async def test_get_area_set_skips_sending_when_the_map_id_is_unknown() -> None:
+    # No map message has been seen for this bus yet: register() alone
+    # leaves MowerStateRecord.map_id at its default of None.
+    bus = _bus()
+    register(bus)
+    command = GetAreaSet()
+
+    result, response = await command._execute(AsyncMock(), _DEVICE_INFO, bus)
+
+    assert result.state is HandlingState.ANALYSE
+    assert response == {}
+
+
+async def test_get_area_set_skips_for_an_unregistered_bus_too() -> None:
+    # A bus record_for() has never seen at all behaves the same as one
+    # registered but without a map id yet — map_id_for() returns None for
+    # both, by design (see its docstring).
+    bus = _bus()
+    command = GetAreaSet()
+
+    result, response = await command._execute(AsyncMock(), _DEVICE_INFO, bus)
+
+    assert result.state is HandlingState.ANALYSE
+    assert response == {}
 
 
 def test_get_area_set_waits_for_the_stream_to_complete() -> None:

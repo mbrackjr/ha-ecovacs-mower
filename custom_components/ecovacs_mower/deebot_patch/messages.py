@@ -1044,11 +1044,13 @@ class OnAreaParameter(MessageBodyDataDict):
     in the Ecovacs app, typically arriving within a couple hundred
     milliseconds, well before the client's own explicit post-write refresh
     (a ``getAreaParameter`` plus a multipart ``getAreaSet``) completes.
-    Registering this push is what closes most of the window in which a
-    second fast write to the same area would otherwise still see the
-    pre-write snapshot. ``setAreaParameter`` itself does not support MQTT
-    p2p echo handling, which is why this relies on the ``onAreaParameter``
-    push rather than deebot-client's usual set/get pairing.
+    Registering this push is what closes most of the window in which an
+    overlapping write to the same area would otherwise still see the
+    pre-write snapshot (see ``area_sensors._PendingAreaWrite`` for what
+    covers the rest of that window). ``setAreaParameter`` itself does not
+    support MQTT p2p echo handling, which is why this relies on the
+    ``onAreaParameter`` push rather than deebot-client's usual set/get
+    pairing.
     """
 
     NAME = "onAreaParameter"

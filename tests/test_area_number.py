@@ -1,5 +1,6 @@
 """Tests for the writable per-area mowing parameter number entities."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from tests import requires_ha
@@ -147,13 +148,17 @@ async def test_a_successful_write_sends_one_complete_command_and_refreshes() -> 
     device.events.request_refresh.assert_called_once()
 
 
-async def test_back_to_back_writes_do_not_revert_each_other() -> None:
-    """Regression test for the stale-snapshot race the Copilot review found.
+async def test_a_sequential_second_write_merges_the_pending_values() -> None:
+    """A second write, issued only after the first has returned, merges
+    against the first write's sent values rather than the pre-write
+    snapshot.
 
-    Two fast writes to different parameters of the same area must not use
-    the same unconfirmed authoritative snapshot for both: the second write
-    has to build on the first write's *sent* values, not the pre-first-write
-    state, or it silently reverts the first change.
+    This covers ordering correctness, not concurrency safety: two
+    sequential ``await``s never overlap, since asyncio only switches
+    coroutines at a suspension point and there is not one between this
+    test's two calls. See ``test_concurrent_writes_do_not_revert_each_other``
+    for the case that actually exercises the race Nord- identified in
+    review — this test would pass even without the fix that closes it.
     """
     from custom_components.ecovacs_mower.area_sensors import (
         EcovacsAreaNumber,
@@ -176,6 +181,78 @@ async def test_back_to_back_writes_do_not_revert_each_other() -> None:
     # simulate the mower's confirmation not having arrived yet.
     await height_entity.async_set_native_value(6)
     await speed_entity.async_set_native_value(0.55)
+
+    second_command = speed_entity._execute_command.call_args[0][0]
+    assert second_command._args["mowHeightLevel"] == 4  # 6cm from the first write
+    assert second_command._args["cutMode"] == 4  # 0.55 m/s
+
+
+async def test_concurrent_writes_do_not_revert_each_other() -> None:
+    """Regression test for the concurrent-write race Nord- identified in
+    review (PR #97): recording the pending write *after* awaiting
+    confirmation, rather than before, meant two writes dispatched at the
+    same time — not just in quick sequence — could both read the same
+    stale snapshot and the second would still revert the first.
+
+    Home Assistant dispatches each ``number.set_value`` call as its own
+    asyncio task (two automations firing together, a script's parallel
+    block, or two targets in one service call), so this uses
+    ``asyncio.create_task`` rather than sequential ``await``s. A naive test
+    using sequential awaits cannot expose this: asyncio only switches
+    coroutines at a suspension point, and there is not one between two
+    sequential ``await`` statements — the first call fully completes,
+    including everything after its own internal await, before the second
+    one is even entered. That is exactly why the earlier, sequential
+    version of this test passed against the buggy code and proved nothing
+    about concurrency (see
+    ``test_a_sequential_second_write_merges_the_pending_values``).
+
+    Both writes are deliberately blocked inside ``_execute_command`` — the
+    mocked mower "hangs" mid-request — until both have reached that point.
+    That is the actual vulnerable window: after a write has computed its
+    merged command but before the mower has confirmed it. Only once both
+    tasks are confirmed to be sitting in that window are they released,
+    so the test does not depend on any particular number of event-loop
+    iterations or asyncio scheduling internals to force the interleaving.
+    """
+    from custom_components.ecovacs_mower.area_sensors import (
+        EcovacsAreaNumber,
+        _PendingAreaWrite,
+    )
+
+    device = _device()
+    _seed_area(device, _full_area())
+    pending = _PendingAreaWrite()
+    height_entity = EcovacsAreaNumber(
+        device, "12", _cutting_height_description(), "North lawn", pending
+    )
+    speed_entity = EcovacsAreaNumber(
+        device, "12", _mowing_speed_description(), "North lawn", pending
+    )
+
+    release = asyncio.Event()
+    dispatched = 0
+    both_dispatched = asyncio.Event()
+
+    async def blocking_execute(_command: object) -> None:
+        nonlocal dispatched
+        dispatched += 1
+        if dispatched == 2:
+            both_dispatched.set()
+        await release.wait()
+
+    height_entity._execute_command = AsyncMock(side_effect=blocking_execute)
+    speed_entity._execute_command = AsyncMock(side_effect=blocking_execute)
+
+    task1 = asyncio.create_task(height_entity.async_set_native_value(6))
+    task2 = asyncio.create_task(speed_entity.async_set_native_value(0.55))
+
+    # Wait until both writes have computed their command and are blocked on
+    # confirmation — the exact window the fix must stay correct through.
+    await asyncio.wait_for(both_dispatched.wait(), timeout=1)
+    release.set()
+    await task1
+    await task2
 
     second_command = speed_entity._execute_command.call_args[0][0]
     assert second_command._args["mowHeightLevel"] == 4  # 6cm from the first write

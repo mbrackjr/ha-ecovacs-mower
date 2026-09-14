@@ -252,16 +252,26 @@ class _PendingAreaWrite:
     Shared by all four ``EcovacsAreaNumber`` entities of one area. Once set,
     ``raw_values`` holds the complete four-value payload just sent to the
     mower; the next write merges against it instead of the last *confirmed*
-    snapshot, which may still be in flight — otherwise a second fast write
-    to a different field would silently revert the first. It is cleared once
-    a fresh ``MowerAreaEvent`` is received for the area.
+    snapshot, which may still be in flight. It is cleared once a fresh
+    ``MowerAreaEvent`` is received for the area.
+
+    This matters because two writes to the same area can genuinely overlap:
+    Home Assistant dispatches each ``number.set_value`` call as its own
+    asyncio task, so two automations, or a script's parallel block, can both
+    have their ``async_set_native_value`` running at once. Without this
+    class, both would read the same confirmed snapshot, and whichever
+    command reaches the mower second would silently overwrite the field the
+    first one just changed. ``EcovacsAreaNumber.async_set_native_value``
+    records the merged values *before* awaiting confirmation specifically so
+    this stays correct under that overlap, not only when writes happen to
+    be sequential — see the comment at that assignment, and
+    ``test_concurrent_writes_do_not_revert_each_other``.
 
     In practice the mower's ``onAreaParameter`` push (see
     ``deebot_patch.messages.OnAreaParameter``) confirms a write and clears
-    this within roughly 150ms, well before a person could plausibly make a
-    second change by hand. This class is what covers the remaining gap: two
-    writes issued programmatically with no delay, or a mower/firmware that
-    does not send that push.
+    this within roughly 150-200ms. This class is what covers what remains:
+    the window before that push arrives, and any mower or firmware that
+    never sends it.
     """
 
     raw_values: dict[str, int | None] | None = None
@@ -479,11 +489,30 @@ class EcovacsAreaNumber(EcovacsDescriptionEntity, NumberEntity):
                 "the mower to report all area settings"
             )
 
-        await self._execute_command(command)
+        # Recorded before sending, not after: everything above this line is
+        # synchronous, so this whole read-merge-record sequence contains no
+        # `await` and cannot be interleaved with another coroutine's write to
+        # the same area. Recording it after `_execute_command` instead would
+        # reopen the exact race this class exists to close — two concurrent
+        # `async_set_native_value` calls (e.g. two automations, or a script's
+        # parallel block, both targeting this area) would each reach the
+        # `self._pending.raw_values is not None` check above while the other
+        # is still awaiting its own confirmation, both fall back to the same
+        # stale snapshot, and the second would still silently revert the
+        # first. See ``_PendingAreaWrite`` and
+        # ``test_concurrent_writes_do_not_revert_each_other``.
+        #
+        # `_execute_command` warns and never raises when the mower doesn't
+        # confirm a command (see its docstring) — a write it never actually
+        # applied still becomes the merge base for the next one until a
+        # fresh ``MowerAreaEvent`` supersedes it. Accepted: the alternative
+        # is guessing whether an unconfirmed command succeeded, which is not
+        # meaningfully safer.
         self._pending.raw_values = {
             **current,
             self.entity_description.raw_field: raw_value,
         }
+        await self._execute_command(command)
 
         self._device.events.request_refresh(MowerAreaEvent)
 
