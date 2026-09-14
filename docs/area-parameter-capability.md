@@ -12,13 +12,21 @@ The snapshot is kept in `deebot_patch/areas.py`, keyed by the device's event bus
 
 Area names and IDs are also kept in that same snapshot because `getAreaSet` is the authoritative source for the current area inventory. Areas no longer reported by the mower are removed from the snapshot.
 
+## Map identity
+
+`getAreaSet` requires the id of the map whose areas are being asked for (`mid`). This project already tracks that value continuously: `state_precedence.map_id_for(event_bus)` is populated from any map message's envelope (`onMI`, `onArI`, `onSpecialContour`, `onMapInfo_V2`; see `state_precedence.note_map`), because `deebot_patch/border.py`'s `MowBorder` already needs the same value and refuses to run (`ValueError`) without a real one.
+
+A mower has exactly one *active* map at a time, but that map's id is not fixed for its lifetime. A relearn — rescanning the boundary after a significant layout change, or an explicit request from the owner — can retire the old id and assign a new one, and the old map's record can persist, inactive, rather than being deleted: `note_map`'s own docstring notes that `getMapInfo_V2`'s answer "may carry such a map alongside the active one." `GetAreaSet` originally hard-coded `mid: "1"`, which is only correct on a mower whose current map happens to carry that id (PR #97 review).
+
+`GetAreaSet` is registered once, in `hardware.py`'s static `MowerAreaEvent` refresh mapping, before any device has connected, and reused unchanged by deebot-client's `get_refresh_commands()` for the life of that patched capability — unlike `MowBorder`, which is built fresh at button-press time with the map id already resolved by its caller. There is no equivalent per-invocation call site for `GetAreaSet` to hook a similar factory into. Instead, `GetAreaSet` overrides `_execute()` to look up `map_id_for(event_bus)` immediately before every send, on the one long-lived instance, rather than trusting anything captured once at `__init__`. If the map id is not known yet — a plausible race at cold start, since entity-platform setup is not ordered relative to `EcovacsController._setup_map`'s map subscription — the command skips sending rather than guessing; see "Known gaps" below for what does (and does not) re-trigger it afterward.
+
 ## What `deebot_patch` owns
 
 The patch layer owns only the missing Ecovacs protocol pieces and their raw values:
 
 - `GetAreaParameter` parses `getAreaParameter` and stores `mowHeightLevel`, `cutMode`, `obstacleHeight`, and `angle` as raw values.
 - `OnAreaParameter` parses the mower's unsolicited `onAreaParameter` push through the same `apply_area_parameters` helper `GetAreaParameter` uses, registered in `deebot_patch/messages.py` and `apply()` the same way as this integration's other unsolicited-message handlers (`OnProtectState`, `OnRainDelay`, etc.).
-- `GetAreaSet` reassembles the mower's chunked `ar` response, decodes it using the existing deebot-client decompressor, and extracts the area ID and name.
+- `GetAreaSet` reassembles the mower's chunked `ar` response, decodes it using the existing deebot-client decompressor, and extracts the area ID and name. It resolves the request's map id fresh on every send — see "Map identity" above.
 - `SetAreaParameter` sends all four raw parameter fields for one `areaID`.
 - The two read commands are registered together as the area refresh so the snapshot can be populated from both responses.
 
@@ -62,3 +70,5 @@ This keeps the area-parameter capability narrowly scoped: protocol parsing and r
 ## Known gaps
 
 `getAreaSet` (area names/inventory) has no confirmed unsolicited-push equivalent, unlike `getAreaParameter`. A capture of the phone app polling `getAreaSet` while idle showed only `iot/p2p/...` request/response traffic — the same "does not support p2p handling (yet)" path `setAreaParameter` hits — and no `iot/atr/onAreaSet`-style topic. This does not rule one out: the capture did not include an actual area rename or re-map, which is the case that would produce it if it exists. Area names and inventory therefore still only update through the polled refresh, reload, or a manual entity update.
+
+If `GetAreaSet` fires before the mower's map id is known (see "Map identity" above), it skips sending rather than guessing, and nothing currently re-triggers `MowerAreaEvent`'s refresh once the map id does become known. In that case the area inventory only populates on whatever next triggers the refresh anyway — an area parameter write, a manual entity update, or a reload — the same fallback already in place for the general "changes require an explicit trigger" limitation above. This has not been observed to happen in practice; it is a plausible ordering gap between entity-platform setup and `EcovacsController._setup_map`'s subscription, not a confirmed failure.
