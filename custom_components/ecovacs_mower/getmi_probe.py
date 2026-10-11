@@ -1,16 +1,21 @@
 """THROWAWAY EXPERIMENT — not for merging.
 
-Finds out which ``getMI`` request a GOAT on firmware 1.13 answers with the
-``onMI`` push that names the map in use. The Ecovacs app sends ``getMI`` when
-its map opens; the mower acks it and then pushes ``onMI`` with ``mid`` and
-``using: 1``. The app's request body is not visible on the mower's MQTT
-channel, so each candidate body is tried in turn.
+Finds out which request makes a GOAT on firmware 1.13 name the map in use,
+which ``GetAreaSet`` needs before it can fetch the area names. Once, about
+20 s after startup, per patched mower, it sends in turn:
 
-For every candidate the probe forgets the map id, sends the request, waits,
-and logs whether an ``onMI`` taught the id again. Every line is logged at
-WARNING with the prefix ``[getMI probe]``, so no debug logging is needed:
+1. ``getMapState {}``: does the answer carry ``mid``? (Janverhu/ecovacs-goat-g1
+   reads it from there for the O-series.)
+2. ``getPos ["chargePos", "deebotPos"]``: does the answer carry ``mid``, and is
+   it a real one or ``"0"``?
+3. ``getMI {"type": "0"}``: is it followed by ``onMI`` on the first request
+   after a fresh start?
 
-    ha core logs | grep "getMI probe"
+Before each request the recorded map id is cleared; 5 s after it the raw
+answer and the map id are logged. Everything is logged at WARNING with the
+prefix ``[map probe]``, so no debug logging is needed:
+
+    ha core logs | grep "map probe"
 """
 
 from __future__ import annotations
@@ -26,49 +31,69 @@ from .deebot_patch.state_precedence import record_for
 
 _LOGGER = logging.getLogger(__name__)
 
-_START_DELAY = 20  # seconds: let setup, and its getMapInfo_V2 attempt, finish
-_WAIT = 5  # seconds after each request for the onMI push to arrive
-
-_CANDIDATES: tuple[tuple[str, dict[str, Any]], ...] = (
-    ("no body", {}),
-    ('{"type": "0"}', {"type": "0"}),
-    ('{"mid": "", "type": "0"}', {"mid": "", "type": "0"}),
-)
+_START_DELAY = 20  # seconds: let setup finish first
+_WAIT = 5  # seconds after each request for a push to arrive
+_MAX_LOGGED = 700  # characters of each raw answer
 
 
-class _GetMI(ExecuteCommand):
-    """``getMI`` with whatever body the probe hands it."""
+class _Probe(ExecuteCommand):
+    """Always sends a body, even an empty one.
 
+    ``JsonCommand._get_payload`` leaves ``body`` out when the args are empty,
+    and a header-only ``getMI`` went unanswered in the first probe.
+    """
+
+    NAME = "probe"
+
+    def _get_payload(self) -> dict[str, Any]:
+        return {**super()._get_payload(), "body": {"data": self._args}}
+
+
+class _GetMapState(_Probe):
+    NAME = "getMapState"
+
+
+class _GetPos(_Probe):
+    NAME = "getPos"
+
+
+class _GetMI(_Probe):
     NAME = "getMI"
 
 
+_REQUESTS: tuple[tuple[type[ExecuteCommand], Any], ...] = (
+    (_GetMapState, {}),
+    (_GetPos, ["chargePos", "deebotPos"]),
+    (_GetMI, {"type": "0"}),
+)
+
+
 async def async_probe(device: Device) -> None:
-    """Try each candidate body and report which one brings the map id back."""
+    """Send each request and report its answer and the map id after it."""
     did = device.device_info["did"]
     await asyncio.sleep(_START_DELAY)
     record = record_for(device.events)
     if record is None:
-        _LOGGER.warning("[getMI probe] %s is not a patched mower, skipped", did)
+        _LOGGER.warning("[map probe] %s is not a patched mower, skipped", did)
         return
 
     _LOGGER.warning(
-        "[getMI probe] start: did=%s class=%s fw=%s map_id_before=%r",
-        did,
+        "[map probe] start: class=%s fw=%s map_id_before=%r",
         device.device_info["class"],
         device.fw_version,
         record.map_id,
     )
-    for label, body in _CANDIDATES:
+    for command_type, args in _REQUESTS:
         record.map_id = None
-        response = await device.execute_command(_GetMI(body))
-        ack = (response.get("resp") or {}).get("body") if response else None
+        response = await device.execute_command(command_type(args))
         await asyncio.sleep(_WAIT)
+        body = (response.get("resp") or {}).get("body") if response else None
         _LOGGER.warning(
-            "[getMI probe] %-28s ack=%s errno=%s -> map_id=%r (%s)",
-            label,
-            ack,
-            response.get("errno") if response else None,
+            "[map probe] %s %s -> errno=%s map_id_after=%r body=%s",
+            command_type.NAME,
+            args,
+            response.get("errno") if response else "no response",
             record.map_id,
-            "onMI ARRIVED" if record.map_id else "no onMI",
+            str(body)[:_MAX_LOGGED],
         )
-    _LOGGER.warning("[getMI probe] done")
+    _LOGGER.warning("[map probe] done")
