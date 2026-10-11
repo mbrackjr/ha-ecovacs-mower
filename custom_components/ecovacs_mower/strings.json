@@ -137,8 +137,8 @@
       "description": "Start mowing one or more saved mowing areas.",
       "fields": {
         "area_ids": {
-          "name": "Area IDs",
-          "description": "Saved mower area IDs to mow."
+          "name": "Areas",
+          "description": "Saved mowing areas to mow, listed by name once the mower has reported them. An area ID can also be typed."
         }
       }
     }

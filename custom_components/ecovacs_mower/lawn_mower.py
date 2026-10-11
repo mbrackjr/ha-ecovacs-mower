@@ -20,6 +20,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EcovacsMowerConfigEntry
+from .area_options import async_setup_zone_options
 from .controller import EcovacsController
 from .deebot_patch.zonal import MowArea
 from .entity import EcovacsEntity
@@ -53,6 +54,7 @@ async def async_setup_entry(
     ]
     _LOGGER.debug("Adding mowers: %s", mowers)
     async_add_entities(mowers)
+    await async_setup_zone_options(hass, config_entry, controller.devices)
 
 
 class EcovacsMower(EcovacsEntity[Capabilities], LawnMowerEntity):

@@ -327,10 +327,25 @@ those three commands, so a zone job started from the app or from this
 service can be paused and resumed from Home Assistant alike.
 
 The same service can also be used from Home Assistant's UI, where the mower
-entity and one or more zone IDs can be selected.
+entity and one or more zones can be selected. On a mower that reports its zone
+names (today the A1600 LiDAR Pro, which reads them for its per-area parameters,
+below) the **Areas** field lists the zones by name; what gets saved is still
+their IDs, so automations keep the `area_ids` shape above and a zone renamed in
+the app keeps working. A few things follow from Home Assistant describing an
+action once for all mowers:
+
+- The list appears once the mower has reported its zones, a few seconds after
+  Home Assistant starts. A zone added in the app shows up after reloading the
+  browser page. An ID can always be typed instead.
+- With more than one mower reporting zones, each name is prefixed with its
+  mower's name. The saved value is a bare ID, so pick zones of the mower the
+  action targets.
+- An automation saved before names were listed stores its IDs as numbers and
+  may show them as numbers in the editor; it runs unchanged.
 
 The zone IDs are mower-specific. A value being within the accepted 0..999
-range does not imply that the mower has a zone with that ID.
+range does not imply that the mower has a zone with that ID, and a zone that is
+deleted or redrawn in the app may come back under a new ID.
 
 ### Per-area mowing parameters
 
