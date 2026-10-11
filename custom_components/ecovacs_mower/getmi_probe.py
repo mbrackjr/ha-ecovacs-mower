@@ -1,19 +1,12 @@
 """THROWAWAY EXPERIMENT — not for merging.
 
-Finds out which request makes a GOAT on firmware 1.13 name the map in use,
-which ``GetAreaSet`` needs before it can fetch the area names. Once, about
-20 s after startup, per patched mower, it sends in turn:
-
-1. ``getMapState {}``: does the answer carry ``mid``? (Janverhu/ecovacs-goat-g1
-   reads it from there for the O-series.)
-2. ``getPos ["chargePos", "deebotPos"]``: does the answer carry ``mid``, and is
-   it a real one or ``"0"``?
-3. ``getMI {"type": "0"}``: is it followed by ``onMI`` on the first request
-   after a fresh start?
-
-Before each request the recorded map id is cleared; 5 s after it the raw
-answer and the map id are logged. Everything is logged at WARNING with the
-prefix ``[map probe]``, so no debug logging is needed:
+Checks whether the Ecovacs app's getMI differs from ours by naming the map.
+The app's getMI is followed by onMI every time; ours (``{"type": "0"}``) was
+acked without one in three of four tries, and the app already knows the map
+id before the mower names it. Once, about 20 s after startup, per patched
+mower, it sends ``getMI {"type": "0"}`` and then ``getMI {"mid": "1",
+"type": "0"}``, clearing the recorded map id before each and logging 8 s
+later whether an onMI taught it again.
 
     ha core logs | grep "map probe"
 """
@@ -32,7 +25,7 @@ from .deebot_patch.state_precedence import record_for
 _LOGGER = logging.getLogger(__name__)
 
 _START_DELAY = 20  # seconds: let setup finish first
-_WAIT = 5  # seconds after each request for a push to arrive
+_WAIT = 8  # seconds after each request for a push to arrive
 _MAX_LOGGED = 700  # characters of each raw answer
 
 
@@ -62,9 +55,10 @@ class _GetMI(_Probe):
 
 
 _REQUESTS: tuple[tuple[type[ExecuteCommand], Any], ...] = (
-    (_GetMapState, {}),
-    (_GetPos, ["chargePos", "deebotPos"]),
+    # Baseline first: if the mower will not resend its map shortly after
+    # sending it, a success of the second request cannot be explained away.
     (_GetMI, {"type": "0"}),
+    (_GetMI, {"mid": "1", "type": "0"}),
 )
 
 
