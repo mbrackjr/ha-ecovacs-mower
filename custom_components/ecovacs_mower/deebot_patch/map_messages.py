@@ -13,7 +13,9 @@ dialect is decided per blob in geometry.py, so one build serves both.
 
 Firmware 1.36 renamed onMI to onMapInfo_V2 and, unlike the rest of these,
 sends it only to a client that asked with getMapInfo_V2 — see OnMapInfo
-below and GetMapInfoV2 in commands.py (issue #81).
+below (issue #81). Firmware 1.13 answers getMI with onMI the same way, and
+otherwise pushes it only now and then. GetMapInfoMower in commands.py asks
+under whichever name the mower answers.
 
 Map data is best effort: a broken payload logs at DEBUG and is dropped,
 it never raises and never touches the control path.

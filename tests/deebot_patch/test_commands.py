@@ -23,7 +23,9 @@ from custom_components.ecovacs_mower.deebot_patch.commands import (
     GetChargeStateMower,
     GetCleanInfoMower,
     GetLifeSpanMower,
+    GetMapInfoMower,
     GetMapInfoV2,
+    GetMI,
     GetProtectState,
     GetRainDelay,
     GetStatsMower,
@@ -34,6 +36,7 @@ from custom_components.ecovacs_mower.deebot_patch.commands import (
     _CleanV2Mower,
     _GetCleanInfoNonV2,
     _GetCleanInfoV2,
+    has_family,
 )
 from custom_components.ecovacs_mower.deebot_patch.families import (
     Family,
@@ -1076,6 +1079,58 @@ def test_get_map_info_v2_parses_nothing_from_the_ack() -> None:
         GetMapInfoV2._handle_body(Mock(), {"code": 500}).state
         is HandlingState.FAILED
     )
+
+
+def test_get_mi_is_the_non_v2_name_with_the_same_body() -> None:
+    # Firmware 1.13.10 on an A1600 LiDAR Pro: the app's map screen sends
+    # getMI, and of the bodies tried with the mower docked and the app
+    # closed only {"type": "0"} was acked and followed by onMI. No body went
+    # unanswered; {"mid": "", "type": "0"} was acked without an onMI.
+    assert GetMI.NAME == "getMI"
+    assert GetMI()._args == {"type": "0"}
+    assert issubclass(GetMI, ExecuteCommand)
+    assert GetMI._handle_body(Mock(), {"code": 0, "msg": "ok"}) == (
+        HandlingResult.success()
+    )
+
+
+def test_the_map_request_is_a_family_adaptive_command() -> None:
+    command = GetMapInfoMower()
+    assert has_family(command)
+    assert type(command._delegate(Family.NON_V2)) is GetMI
+    assert type(command._delegate(Family.V2)) is GetMapInfoV2
+
+
+async def test_a_non_v2_mower_is_asked_with_get_mi_and_nothing_else() -> None:
+    # The default family: the warning firmware 1.13 used to log on every
+    # startup came from asking it getMapInfo_V2 first.
+    fake, sent = _transport(_OK)
+    with patch.object(Command, "_execute", fake):
+        await GetMapInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
+
+    assert sent == ["getMI"]
+    assert selected(_DEVICE_INFO["did"]) is Family.NON_V2
+
+
+async def test_an_unanswered_get_mi_falls_back_to_v2_and_keeps_it() -> None:
+    # The G1-800 on 1.36 before anything has taught its family: one getMI
+    # goes unanswered, getMapInfo_V2 is answered, and the family moves for
+    # every adaptive command of that mower, the clean commands included.
+    fake, sent = _transport(_NO_ANSWER, _OK)
+    with patch.object(Command, "_execute", fake):
+        await GetMapInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
+
+    assert sent == ["getMI", "getMapInfo_V2"]
+    assert selected(_DEVICE_INFO["did"]) is Family.V2
+
+
+async def test_a_known_v2_mower_is_asked_with_get_map_info_v2_directly() -> None:
+    commit(_DEVICE_INFO["did"], Family.V2)
+    fake, sent = _transport(_OK)
+    with patch.object(Command, "_execute", fake):
+        await GetMapInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
+
+    assert sent == ["getMapInfo_V2"]
 
 
 async def test_stop_goes_out_untouched_whatever_the_last_state_was() -> None:

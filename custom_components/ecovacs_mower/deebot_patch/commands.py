@@ -47,6 +47,7 @@ animal-protection setting and its window (issue #45).
 
 from __future__ import annotations
 
+from abc import ABC
 import logging
 from datetime import time
 from typing import TYPE_CHECKING, Any
@@ -302,8 +303,9 @@ class _AdaptiveFamily:
 
 def has_family(command: Command) -> bool:
     """Whether *command* is one of the commands whose wire format depends on the
-    mower's dialect (issue #42) — CleanMower, GetCleanInfoMower, MowArea and
-    MowBorder today — the only commands ``family_name()`` means anything for.
+    mower's dialect (issue #42) — CleanMower, GetCleanInfoMower,
+    GetMapInfoMower, MowArea and MowBorder today — the only commands
+    ``family_name()`` means anything for.
 
     Used by ``entity.py`` to decide whether to name the family in the
     unconfirmed-command warning: doing so unconditionally would print it next
@@ -696,8 +698,28 @@ class GetAnimProtect(JsonCommandWithMessageHandling, OnAnimProtect):
     NAME = "getAnimProtect"
 
 
-class GetMapInfoV2(ExecuteCommand):
-    """Ask for the lawn boundary, which is never pushed unasked.
+class _MapInfoRequest(ExecuteCommand, ABC):
+    """Ask for the lawn boundary, under either family's name.
+
+    Nothing here parses an answer, because there is nothing in it: the reply
+    is ``{"code": 0, "msg": "ok"}`` and the payload follows a fraction of a
+    second later on the ``atr`` topic, where ``OnMI`` or ``OnMapInfo`` picks
+    it up. That is what ``ExecuteCommand`` is — a non-zero ``code`` reported
+    as a failure, no response parsing — and the event bus asks nothing more of
+    a refresh command than that it complete: ``_call_refresh_function`` awaits
+    the execute and never checks whether an event came out of it, so a refresh
+    that publishes nothing is neither retried nor logged as failed.
+
+    Both names take the same body, ``{"type": "0"}``. ``ABC`` is a direct base
+    so ``Command.__init_subclass__`` does not demand a ``NAME`` of this one.
+    """
+
+    def __init__(self) -> None:
+        super().__init__({"type": "0"})
+
+
+class GetMapInfoV2(_MapInfoRequest):
+    """``getMapInfo_V2``: what firmware 1.36 answers (issue #81).
 
     Every other map message in this integration is unsolicited telemetry.
     ``onMapInfo_V2`` is not: on a GOAT G1-800 (``77atlz``, fw 1.36.208) the
@@ -705,17 +727,7 @@ class GetMapInfoV2(ExecuteCommand):
     the reason ``onMI``/``onArI``/``onSpecialContour`` are absent from every
     capture anyone has taken against this integration, idle or mid-job. The
     integration subscribed and waited for a push no client had asked for, so
-    the map could only ever be a bare coverage patch with no field around it
-    (issue #81).
-
-    Nothing here parses an answer, because there is nothing in it: the reply
-    is ``{"code": 0, "msg": "ok"}`` and the payload follows a fraction of a
-    second later on the ``atr`` topic, where ``OnMapInfo`` picks it up. That
-    is what ``ExecuteCommand`` is — a non-zero ``code`` reported as a failure,
-    no response parsing — and the event bus asks nothing more of a refresh
-    command than that it complete: ``_call_refresh_function`` awaits the
-    execute and never checks whether an event came out of it, so a refresh
-    that publishes nothing is neither retried nor logged as failed.
+    the map could only ever be a bare coverage patch with no field around it.
 
     The library's own ``GetMapInfoV2`` cannot stand in for this one. It
     inherits ``OnMapInfoV2``'s message handler, which reads ``body.data`` —
@@ -730,8 +742,59 @@ class GetMapInfoV2(ExecuteCommand):
 
     NAME = "getMapInfo_V2"
 
+
+class GetMI(_MapInfoRequest):
+    """``getMI``: what firmware 1.13 answers instead.
+
+    An A1600 LiDAR Pro (``e4gqia``, fw 1.13.10) answers ``getMapInfo_V2`` with
+    ``errno 500`` on every startup, so the map in use was learned only from a
+    map message the mower happened to push — opening the Ecovacs app, or a
+    mowing run. Until one came, ``GetAreaSet`` sent nothing and every area
+    read "Area <id>".
+
+    The app's map screen sends ``getMI``: captured on the same mower, it is
+    acked with code 0 and followed within a second by ``onMI`` carrying
+    ``"mid": "1", "using": 1`` and the outline. The request itself does not
+    show on the mower's MQTT channel, so its body was established by trying
+    candidates from a docked mower with the app closed: no body went
+    unanswered, ``{"type": "0"}`` was acked and brought ``onMI``, and
+    ``{"mid": "", "type": "0"}`` was acked without one.
+    """
+
+    NAME = "getMI"
+
+
+class GetMapInfoMower(_AdaptiveFamily, GetMI):
+    """The boundary request, on whichever name the mower answers.
+
+    ``getMI`` is the non-V2 member of the pair and ``getMapInfo_V2`` the V2
+    one, with the same body and the same kind of answer. ``families.py`` picks
+    the name, so a mower already known to speak V2 is asked with V2 straight
+    away, and the default — non-V2, what every confirmed mower but the G1-800
+    on 1.36 speaks — asks the others with ``getMI`` without a failed request
+    first.
+
+    That this request follows the clean commands' family is an inference from
+    the two firmwares seen: 1.13 answers ``clean`` and ``getMI``, 1.36 answers
+    ``clean_V2`` and ``getMapInfo_V2``. The family is per mower, not per
+    command, so a fallback here also moves the clean commands over, which on
+    both observed firmwares is the right way.
+
+    Extends ``GetMI`` for the reason ``GetCleanInfoMower`` extends
+    ``GetCleanInfo``: a concrete command to be, with the default name on the
+    wrapper for the library's log lines.
+    """
+
     def __init__(self) -> None:
-        super().__init__({"type": "0"})
+        """Build both delegates once; they are stateless."""
+        super().__init__()
+        self._delegates = {
+            Family.NON_V2: GetMI(),
+            Family.V2: GetMapInfoV2(),
+        }
+
+    def _delegate(self, family: Family) -> Command:
+        return self._delegates[family]
 
 
 class SetRainDelay(ExecuteCommand):

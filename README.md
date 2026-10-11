@@ -208,7 +208,7 @@ one per UWB beacon on the models that use them:
 | `number` | 3 + four per saved area on the A1600 LiDAR Pro | Notification volume, cutting direction, rain delay duration, plus cutting height, mowing speed, obstacle height and cutting direction for each saved area (see below) |
 | `button` | 7, 8 on the G1-800 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), "Clear fault" (releases the latched fault; see below), "End mowing task" (ends the current job for good; see below) and, on the G1-800, "Mow border" (starts a border job; see below) |
 | `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped — see below) |
-| `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, `onMapTrace` on firmware 1.17, and `onMapInfo_V2` on 1.36 — that last one only ever arrives in answer to a `getMapInfo_V2` the integration now sends); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
+| `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, `onMapTrace` on firmware 1.17, and `onMapInfo_V2` on 1.36 — that last one only ever arrives in answer to a `getMapInfo_V2` the integration now sends, as `onMI` does on 1.13 in answer to `getMI`); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only |
 
 Not included yet: **RTK diagnostics** (position and satellite data). RTK is
 planned for the next release.
@@ -815,15 +815,17 @@ that shows whether the mower sends `onMI`/`onArI`/`onMapTrack`/
 all. That is the log to attach to a map issue, and the `info` fields have to
 be left intact: they are the map geometry itself.
 
-On firmware older than 1.36, the `getMapInfo_V2` the integration sends at
-setup and after every reconnect may go unanswered, which `deebot_client` logs
-as `Command "getMapInfo_V2" was not successfully.` or `No response received
-for command "getMapInfo_V2"`. That warning is expected and harmless — the
-request is never retried and the boundary those firmwares push unasked as
-`onMI` arrives regardless. It is still worth reporting with the log around
-it: nobody has captured what pre-1.36 firmware answers here, and that capture
-is what would justify picking between `getMapInfo` and `getMapInfo_V2` per
-mower the way the clean commands already do.
+At setup and after every reconnect the integration asks the mower for its map,
+under whichever name the mower answers, the way the clean commands already
+pick theirs: `getMI` on firmware 1.13, answered with `onMI`, and
+`getMapInfo_V2` on 1.36, answered with `onMapInfo_V2`. Besides the boundary,
+that answer is what tells the integration which map is in use, and the
+per-area names wait for it. A mower that has not been seen to speak V2 is
+asked with `getMI` first. On the G1-800 that request is expected to go
+unanswered once, logged by `deebot_client` as `No response received for
+command "getMI"`, after which the integration switches to `getMapInfo_V2`,
+and its clean commands with it. If that warning keeps appearing, or the map
+on a G1-800 loses its boundary, report it with the log around it.
 
 ## Current status
 
