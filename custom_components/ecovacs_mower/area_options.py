@@ -18,9 +18,12 @@ Assistant keys descriptions by action, not by target. With more than one mower
 reporting zones, each label is prefixed with its mower's name. The value is
 still a bare ID, which means something different on each mower.
 
-The frontend fetches descriptions again only when an action is registered or
-removed, so a zone added in the app shows up in an open browser after a
-reload. Zones change rarely; the action itself is unaffected.
+The frontend fetches descriptions again only when it is told an action was
+registered or removed, and ``async_set_service_schema`` tells it nothing. So
+every republish also fires ``service_registered`` for ``mow_area``, the event
+Home Assistant fires itself when an action is registered. Nothing in core
+listens for it; an open browser takes it as the cue to fetch the descriptions
+again, and the names appear without a reload.
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from deebot_client.device import Device
+from homeassistant.const import ATTR_DOMAIN, ATTR_SERVICE, EVENT_SERVICE_REGISTERED
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.service import async_set_service_schema
 from homeassistant.util.yaml import load_yaml_dict
@@ -150,3 +154,8 @@ def _publish(hass: HomeAssistant) -> None:
         return
     hass.data[_PUBLISHED] = description
     async_set_service_schema(hass, DOMAIN, SERVICE, description)
+    # The action was registered long before; this only makes an open browser
+    # fetch the new description (see the module docstring).
+    hass.bus.async_fire(
+        EVENT_SERVICE_REGISTERED, {ATTR_DOMAIN: DOMAIN, ATTR_SERVICE: SERVICE}
+    )

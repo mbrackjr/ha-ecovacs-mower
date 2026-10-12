@@ -165,8 +165,35 @@ async def test_unchanged_zones_are_not_published_again(hass) -> None:
         await _on_areas(device)(_areas(("1", "Front lawn")))
         assert publish.call_count == 1
 
-        await _on_areas(device)(_areas(("1", "Voortuin")))
+        await _on_areas(device)(_areas(("1", "Front garden")))
         assert publish.call_count == 2
+
+
+async def test_a_republish_tells_open_browsers(hass) -> None:
+    """The frontend fetches descriptions again only on service_registered."""
+    from homeassistant.const import EVENT_SERVICE_REGISTERED
+    from pytest_homeassistant_custom_component.common import async_capture_events
+
+    from custom_components.ecovacs_mower import async_setup
+    from custom_components.ecovacs_mower.area_options import (
+        async_setup_zone_options,
+    )
+    from custom_components.ecovacs_mower.deebot_patch.zonal import MowArea
+
+    assert await async_setup(hass, {})
+    await hass.async_block_till_done()
+    events = async_capture_events(hass, EVENT_SERVICE_REGISTERED)
+    device = _mower("did", MowArea)
+    await async_setup_zone_options(hass, _entry(), [device])
+
+    await _on_areas(device)(_areas(("1", "Front lawn")))
+    await _on_areas(device)(_areas(("1", "Front lawn")))
+    await hass.async_block_till_done()
+
+    # Once: the unchanged repeat publishes nothing, so it announces nothing.
+    assert [event.data for event in events] == [
+        {"domain": "ecovacs_mower", "service": "mow_area"}
+    ]
 
 
 async def test_mowers_without_zone_mowing_are_not_followed(hass) -> None:

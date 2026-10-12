@@ -334,9 +334,9 @@ their IDs, so automations keep the `area_ids` shape above and a zone renamed in
 the app keeps working. A few things follow from Home Assistant describing an
 action once for all mowers:
 
-- The list appears once the mower has reported its zones, a few seconds after
-  Home Assistant starts. A zone added in the app shows up after reloading the
-  browser page. An ID can always be typed instead.
+- The list appears once the mower has reported its zone names, and an open
+  browser picks it up without a reload, as it does a zone added or renamed in
+  the app later. An ID can always be typed instead.
 - With more than one mower reporting zones, each name is prefixed with its
   mower's name. The saved value is a bare ID, so pick zones of the mower the
   action targets.
