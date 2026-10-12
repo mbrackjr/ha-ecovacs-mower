@@ -73,6 +73,7 @@ from .deebot_patch.map_messages import (
     MowerObstaclesEvent,
 )
 from .fault import FaultLatch
+from .getmi_probe import async_probe
 from .map import MowerMap
 
 _LOGGER = logging.getLogger(__name__)
@@ -247,6 +248,10 @@ class EcovacsController:
                                     did,
                                     exc_info=True,
                                 )
+                            # THROWAWAY EXPERIMENT — see getmi_probe.py.
+                            self._hass.async_create_background_task(
+                                async_probe(device), name=f"getmi_probe_{did}"
+                            )
 
                     for device in mqtt_devices:
                         tg.create_task(_init(device))
