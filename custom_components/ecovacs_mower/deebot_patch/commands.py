@@ -48,10 +48,18 @@ animal-protection setting and its window (issue #45).
 parsed by ``OnPos``, but the answer to a ``getPos`` is parsed by the command
 itself, so it needs the same fix or it keeps the library's ``invalid == 0``
 filter.
+
+``GetMapInfoMower`` asks for the lawn boundary, and with it the map in use,
+under whichever name the mower's family answers: ``getMapInfo_V2`` for V2,
+``getMI`` for non-V2. The ``getMI`` is preceded by an ``appping``, because
+without one the non-V2 mower it was confirmed on acks the request and pushes
+nothing.
 """
 
 from __future__ import annotations
 
+from abc import ABC
+import asyncio
 import logging
 from datetime import time
 from typing import TYPE_CHECKING, Any
@@ -309,8 +317,9 @@ class _AdaptiveFamily:
 
 def has_family(command: Command) -> bool:
     """Whether *command* is one of the commands whose wire format depends on the
-    mower's dialect (issue #42) — CleanMower, GetCleanInfoMower, MowArea and
-    MowBorder today — the only commands ``family_name()`` means anything for.
+    mower's dialect (issue #42) — CleanMower, GetCleanInfoMower,
+    GetMapInfoMower, MowArea and MowBorder today — the only commands
+    ``family_name()`` means anything for.
 
     Used by ``entity.py`` to decide whether to name the family in the
     unconfirmed-command warning: doing so unconditionally would print it next
@@ -736,8 +745,28 @@ class GetPosMower(GetPos):
         return OnPos._handle_body_data_dict(event_bus, data)
 
 
-class GetMapInfoV2(ExecuteCommand):
-    """Ask for the lawn boundary, which is never pushed unasked.
+class _MapInfoRequest(ExecuteCommand, ABC):
+    """Ask for the lawn boundary, under either family's name.
+
+    Nothing here parses an answer, because there is nothing in it: the reply
+    is ``{"code": 0, "msg": "ok"}`` and the payload follows a fraction of a
+    second later on the ``atr`` topic, where ``OnMI`` or ``OnMapInfo`` picks
+    it up. That is what ``ExecuteCommand`` is — a non-zero ``code`` reported
+    as a failure, no response parsing — and the event bus asks nothing more of
+    a refresh command than that it complete: ``_call_refresh_function`` awaits
+    the execute and never checks whether an event came out of it, so a refresh
+    that publishes nothing is neither retried nor logged as failed.
+
+    Both names take the same body, ``{"type": "0"}``. ``ABC`` is a direct base
+    so ``Command.__init_subclass__`` does not demand a ``NAME`` of this one.
+    """
+
+    def __init__(self) -> None:
+        super().__init__({"type": "0"})
+
+
+class GetMapInfoV2(_MapInfoRequest):
+    """``getMapInfo_V2``: the V2 family's boundary request; never pushed unasked.
 
     Every other map message in this integration is unsolicited telemetry.
     ``onMapInfo_V2`` is not: on a GOAT G1-800 (``77atlz``, fw 1.36.208) the
@@ -747,15 +776,6 @@ class GetMapInfoV2(ExecuteCommand):
     integration subscribed and waited for a push no client had asked for, so
     the map could only ever be a bare coverage patch with no field around it
     (issue #81).
-
-    Nothing here parses an answer, because there is nothing in it: the reply
-    is ``{"code": 0, "msg": "ok"}`` and the payload follows a fraction of a
-    second later on the ``atr`` topic, where ``OnMapInfo`` picks it up. That
-    is what ``ExecuteCommand`` is — a non-zero ``code`` reported as a failure,
-    no response parsing — and the event bus asks nothing more of a refresh
-    command than that it complete: ``_call_refresh_function`` awaits the
-    execute and never checks whether an event came out of it, so a refresh
-    that publishes nothing is neither retried nor logged as failed.
 
     The library's own ``GetMapInfoV2`` cannot stand in for this one. It
     inherits ``OnMapInfoV2``'s message handler, which reads ``body.data`` —
@@ -770,8 +790,113 @@ class GetMapInfoV2(ExecuteCommand):
 
     NAME = "getMapInfo_V2"
 
+
+class _AppPing(ExecuteCommand):
+    """``appping``: what the Ecovacs app sends to say it is open.
+
+    The mower never answers it. The app sends it when it opens a mower and
+    about every two minutes after, with an empty body.
+    """
+
+    NAME = "appping"
+
     def __init__(self) -> None:
-        super().__init__({"type": "0"})
+        super().__init__({})
+
+    def _get_payload(self) -> dict[str, Any]:
+        # JsonCommand leaves the body out when there are no arguments; the app
+        # sends {"data": {}}, and that is the form confirmed to work.
+        return {**super()._get_payload(), "body": {"data": {}}}
+
+
+# How long the ping gets before getMI goes out. The mower never answers it,
+# so this is a head start rather than a wait for an answer: the cloud has the
+# request within milliseconds, and the HTTP call is abandoned when this runs
+# out rather than held open until the cloud gives up on the mower.
+_APP_PING_HEAD_START = 3  # seconds
+
+
+class GetMI(_MapInfoRequest):
+    """``getMI``: the non-V2 family's boundary request, and the map in use.
+
+    A non-V2 A1600 LiDAR Pro (``e4gqia``) answers ``getMapInfo_V2`` with
+    ``errno 500``. The app's map screen asks with ``getMI`` instead, and the
+    mower acks it and pushes ``onMI`` with ``"mid": "1", "using": 1`` and the
+    outline. ``onMI``'s envelope is also the first word on which map is
+    in use, so ``GetAreaSet``, and with it every area's name, waits for it.
+
+    But the mower pushes ``onMI`` only while it believes the app is open. A
+    ``getMI`` on its own, with the app closed for a few minutes, is acked
+    and nothing follows; preceded by an ``appping`` it is answered within
+    seconds. Seen in two runs with a docked mower and the app closed:
+    ``getMI`` alone, no ``onMI``; ``appping``, then
+    ``getMI``, ``onMI``; and a ``getMI`` alone half a minute later, still
+    ``onMI``. Neither the request's header nor its route made a difference:
+    ``getMI`` with the app's own header went unanswered too, and the ping that
+    worked went out exactly as this integration sends any command. The app
+    pings first as well, and keeps pinging while it is open, which is why a
+    ``getMI`` sent within minutes of using the app could work without one.
+    """
+
+    NAME = "getMI"
+
+    async def _execute(
+        self,
+        authenticator: Authenticator,
+        device_info: ApiDeviceInfo,
+        event_bus: EventBus,
+    ) -> tuple[HandlingResult, dict[str, Any]]:
+        """Ping as the app does, then ask."""
+        try:
+            await asyncio.wait_for(
+                _AppPing()._execute_api_request(authenticator, device_info),
+                _APP_PING_HEAD_START,
+            )
+        except TimeoutError:
+            pass  # the usual outcome: the mower does not answer a ping
+        except Exception:
+            # A ping that fails costs the map nothing more than skipping it
+            # would, so it must not keep getMI from going out.
+            _LOGGER.debug("appping before getMI failed", exc_info=True)
+        return await super()._execute(authenticator, device_info, event_bus)
+
+
+class GetMapInfoMower(_AdaptiveFamily, GetMI):
+    """The boundary request, on whichever name the mower answers.
+
+    ``getMI`` (with its ``appping``) is the non-V2 member of the pair and
+    ``getMapInfo_V2`` the V2 one, with the same body and the same kind of
+    answer. ``families.py`` picks the name, so a mower already known to speak
+    V2 is asked with V2 straight away, and the default, non-V2, asks the
+    others with ``getMI`` without a failed request first.
+
+    That this request follows the clean commands' family is an inference from
+    the two mowers seen: the non-V2 A1600 LiDAR Pro (``e4gqia``) answers
+    ``clean`` and ``getMI``, the V2 G1-800 (``77atlz``) answers ``clean_V2``
+    and ``getMapInfo_V2``. What a V2 mower answers to ``getMI`` has not been
+    captured. The fallback assumes ``errno 500``, as for its other non-V2
+    commands; an ack without a push would leave a V2 mower whose family is not
+    known yet without a boundary until the next refresh. The family is per
+    mower, not per command, so a fallback here also moves the clean commands
+    over, which on both mowers seen is the right way.
+
+    Extends ``GetMI`` for the reason ``GetCleanInfoMower`` extends
+    ``GetCleanInfo``: a concrete command to be, with the default name on the
+    wrapper for the library's log lines. ``_AdaptiveFamily._execute`` comes
+    first in the MRO, so the ping happens only in the ``GetMI`` delegate,
+    never for the V2 one.
+    """
+
+    def __init__(self) -> None:
+        """Build both delegates once; they are stateless."""
+        super().__init__()
+        self._delegates = {
+            Family.NON_V2: GetMI(),
+            Family.V2: GetMapInfoV2(),
+        }
+
+    def _delegate(self, family: Family) -> Command:
+        return self._delegates[family]
 
 
 class SetRainDelay(ExecuteCommand):
