@@ -380,7 +380,7 @@ class EcovacsDebugButtonEntity(
             self.hass, self._device, self._execute_command
         )
         self._log = log
-        self.async_on_remove(log.async_stop)
+        self.async_on_remove(log.async_shutdown)
 
     @override
     async def async_press(self) -> None:

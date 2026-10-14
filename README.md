@@ -397,7 +397,9 @@ setting in the Ecovacs app. The **Log area parameters** button collects that:
    app offers, its minimum and maximum included, and write down what you set.
    The notification updates as the mower reports each change, and lists every
    change with its time, for example
-   `18:07:06 Area 1 (Front lawn): mow_height_level 6 → 7`.
+   `18:07:06 Area 1 (Front lawn): mow_height_level 6 → 7`. A mower that
+   reports changes on its own shows them within a second; for any other the
+   integration asks every 15 seconds, so wait that long between steps.
 4. Copy the notification into a new issue, together with your notes and your
    mower's model. The device class the integration needs is in the
    notification's title, in brackets.

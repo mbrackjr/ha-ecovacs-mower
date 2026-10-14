@@ -9,8 +9,12 @@ steps to ask for, only a record of what changed while the owner tries.
 parameters" button, it reads the areas once, then follows every change for
 ``LOG_WINDOW``. Read-only on every class: nothing here writes to the mower, so
 it is safe on a model whose values nobody has mapped yet. Changes made in the
-app arrive without a request, because the mower pushes ``onAreaParameter`` to
-every client and that push is handled for every patched mower, flag or no flag.
+app arrive in two ways. The mower pushes ``onAreaParameter`` to every client,
+and that push is handled for every patched mower, flag or no flag; but it has
+only been seen on the A1600 LiDAR Pro, and this is for models nobody has
+looked at. So the areas are also asked for again every ``POLL_INTERVAL`` while
+the window is open. On a mower that pushes, a poll answer that repeats the
+last report is dropped by the bus and costs nothing more than the request.
 
 The record is a persistent notification, one per mower, rewritten on every
 change: the current raw values as a table and every change with its time.
@@ -31,7 +35,7 @@ from deebot_client.command import Command
 from deebot_client.device import Device
 from homeassistant.components import persistent_notification
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
-from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
@@ -42,6 +46,7 @@ from .deebot_patch.state_precedence import map_id_for
 _LOGGER = logging.getLogger(__name__)
 
 LOG_WINDOW = timedelta(minutes=15)
+POLL_INTERVAL = timedelta(seconds=15)
 
 # Enough for stepping four settings through their ranges; past it the oldest
 # changes give way so the notification stays readable.
@@ -62,8 +67,8 @@ class DebugLog(Protocol):
         """Start, or restart, logging."""
 
     @callback
-    def async_stop(self) -> None:
-        """Stop logging, silently. Called when the button is removed."""
+    def async_shutdown(self) -> None:
+        """Stop logging for good. Called when the button is removed."""
 
 
 class AreaParameterLog:
@@ -83,6 +88,7 @@ class AreaParameterLog:
         self._until: datetime | None = None
         self._unsub_event: CALLBACK_TYPE | None = None
         self._unsub_timer: CALLBACK_TYPE | None = None
+        self._unsub_poll: CALLBACK_TYPE | None = None
 
     async def async_start(self) -> None:
         """Show the current values now, then every change until the window closes.
@@ -91,7 +97,7 @@ class AreaParameterLog:
         subscription is renewed because the bus hands a new subscriber its last
         event, which is the current table when nothing has changed since.
         """
-        self.async_stop()
+        self._async_stop()
         self._areas = None
         self._changes = []
         self._notes = []
@@ -103,6 +109,9 @@ class AreaParameterLog:
         self._publish()
         # Subscribed before asking, so the answer cannot arrive unheard.
         self._unsub_event = self._device.events.subscribe(MowerAreaEvent, self._on_areas)
+        self._unsub_poll = async_track_time_interval(
+            self._hass, self._poll, POLL_INTERVAL
+        )
 
         if not await self._execute(GetAreaParameter()):
             self._note(
@@ -120,21 +129,42 @@ class AreaParameterLog:
             await self._execute(GetAreaSet(map_id))
 
     @callback
-    def async_stop(self) -> None:
+    def async_shutdown(self) -> None:
+        """Stop for good, and say so if a window was open.
+
+        Called when the button is removed: an integration reload, HA stopping,
+        the entity disabled. Without the rewrite the notification would keep
+        saying it is following changes.
+        """
+        if self._until is not None:
+            self._end("stopped early")
+
+    @callback
+    def _async_stop(self) -> None:
         """Stop following changes, silently; the notification stays."""
-        for unsub in (self._unsub_event, self._unsub_timer):
+        for unsub in (self._unsub_event, self._unsub_timer, self._unsub_poll):
             if unsub is not None:
                 unsub()
-        self._unsub_event = self._unsub_timer = None
+        self._unsub_event = self._unsub_timer = self._unsub_poll = None
 
     @callback
     def _on_window_end(self, _now: datetime) -> None:
-        # async_call_later has fired and removed itself; only the event is left.
+        # async_call_later has fired and removed itself; the rest is left.
         self._unsub_timer = None
-        self.async_stop()
+        self._end("stopped")
+
+    @callback
+    def _end(self, how: str) -> None:
+        self._async_stop()
         self._until = None
         self._publish()
-        _LOGGER.warning("%s %s: stopped", _TAG, self._label)
+        _LOGGER.warning("%s %s: %s", _TAG, self._label, how)
+
+    async def _poll(self, _now: datetime) -> None:
+        """Ask again, for a mower that does not push its changes."""
+        # A failure here is not noted: the first answer already said whether
+        # the mower answers at all, and one lost poll is made up by the next.
+        await self._execute(GetAreaParameter())
 
     async def _on_areas(self, event: MowerAreaEvent) -> None:
         """Take the first report as the table, record what changes after it."""
