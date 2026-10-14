@@ -1158,15 +1158,26 @@ def _pinging(sent: list[str], ping=None):
     return patch.object(_AppPing, "_execute_api_request", ping or record)
 
 
-async def test_a_non_v2_mower_is_pinged_then_asked_with_get_mi() -> None:
-    # A non-V2 mower acks a bare getMI and pushes nothing; after an appping it
-    # pushes onMI within seconds. And no getMapInfo_V2 first: that is the
-    # warning a non-V2 mower logged on every startup.
+async def test_a_v2_mower_is_asked_with_v2_and_its_family_committed() -> None:
+    # getMapInfo_V2 first, because both answers to it are known; how a V2
+    # mower answers getMI is not. A V2 mower answers it, gets no getMI and no
+    # ping, and V2 is committed for its clean commands too.
     fake, sent = _transport(_OK)
     with patch.object(Command, "_execute", fake), _pinging(sent):
         await GetMapInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
 
-    assert sent == ["appping", "getMI"]
+    assert sent == ["getMapInfo_V2"]
+    assert selected(_DEVICE_INFO["did"]) is Family.V2
+
+
+async def test_a_non_v2_mower_falls_back_to_a_pinged_get_mi() -> None:
+    # A non-V2 A1600 rejects getMapInfo_V2 with errno 500; the fallback pings
+    # and asks getMI, and the family stays non-V2.
+    fake, sent = _transport(_NO_ANSWER, _OK)
+    with patch.object(Command, "_execute", fake), _pinging(sent):
+        await GetMapInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
+
+    assert sent == ["getMapInfo_V2", "appping", "getMI"]
     assert selected(_DEVICE_INFO["did"]) is Family.NON_V2
 
 
@@ -1175,7 +1186,7 @@ async def test_a_ping_nobody_answers_does_not_hold_up_get_mi() -> None:
     async def unanswered(self, authenticator, device_info):
         await asyncio.Event().wait()
 
-    fake, sent = _transport(_OK)
+    fake, sent = _transport(_NO_ANSWER, _OK)
     with (
         patch.object(Command, "_execute", fake),
         _pinging(sent, unanswered),
@@ -1187,41 +1198,28 @@ async def test_a_ping_nobody_answers_does_not_hold_up_get_mi() -> None:
     ):
         await GetMapInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
 
-    assert sent == ["getMI"]
+    assert sent == ["getMapInfo_V2", "getMI"]
 
 
 async def test_a_failed_ping_does_not_keep_get_mi_from_going_out() -> None:
     async def failing(self, authenticator, device_info):
         raise RuntimeError("cloud unreachable")
 
-    fake, sent = _transport(_OK)
+    fake, sent = _transport(_NO_ANSWER, _OK)
     with patch.object(Command, "_execute", fake), _pinging(sent, failing):
         await GetMapInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
 
-    assert sent == ["getMI"]
+    assert sent == ["getMapInfo_V2", "getMI"]
 
 
-async def test_an_unanswered_get_mi_falls_back_to_v2_and_keeps_it() -> None:
-    # A V2 G1-800 before anything has taught its family, assuming it
-    # answers getMI the way it answers its other non-V2 commands: errno 500.
-    # getMapInfo_V2 is answered, and the family moves for every adaptive
-    # command of that mower, the clean commands included.
-    fake, sent = _transport(_NO_ANSWER, _OK)
-    with patch.object(Command, "_execute", fake), _pinging(sent):
-        await GetMapInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
-
-    assert sent == ["appping", "getMI", "getMapInfo_V2"]
-    assert selected(_DEVICE_INFO["did"]) is Family.V2
-
-
-async def test_a_known_v2_mower_is_asked_with_get_map_info_v2_alone() -> None:
-    # No ping for the V2 family: it answers getMapInfo_V2 on demand.
-    commit(_DEVICE_INFO["did"], Family.V2)
+async def test_the_clean_commands_still_start_on_the_selected_family() -> None:
+    # Only the map request starts on V2; clean info still goes out non-V2
+    # first on a mower whose family is not known, as before.
     fake, sent = _transport(_OK)
-    with patch.object(Command, "_execute", fake), _pinging(sent):
-        await GetMapInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
+    with patch.object(Command, "_execute", fake):
+        await GetCleanInfoMower()._execute(AsyncMock(), _DEVICE_INFO, _bus())
 
-    assert sent == ["getMapInfo_V2"]
+    assert sent == ["getCleanInfo"]
 
 
 async def test_stop_goes_out_untouched_whatever_the_last_state_was() -> None:

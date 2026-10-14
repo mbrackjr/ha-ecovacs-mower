@@ -289,20 +289,28 @@ class _AdaptiveFamily:
         """The command that goes out for *family*."""
         raise NotImplementedError
 
+    def _first_family(self, did: str) -> Family:
+        """The family to try first: the selected one, unless overridden."""
+        return selected(did)
+
     async def _execute(
         self,
         authenticator: Authenticator,
         device_info: ApiDeviceInfo,
         event_bus: EventBus,
     ) -> tuple[HandlingResult, dict[str, Any]]:
-        """Execute on the selected family, falling back to the other once."""
+        """Execute on the first family, falling back to the other once."""
         did = device_info["did"]
-        current = selected(did)
+        current = self._first_family(did)
         result, response = await self._delegate(current)._execute(
             authenticator, device_info, event_bus
         )
         if response.get("errno") != 500:
             note_attempt(did, current)
+            if current is not selected(did) and response.get("ret") == "ok":
+                # A family other than the selected one answered first time:
+                # the same positive evidence a fallback commits on.
+                commit(did, current)
             return result, response
 
         other = current.other()
@@ -866,19 +874,19 @@ class GetMapInfoMower(_AdaptiveFamily, GetMI):
 
     ``getMI`` (with its ``appping``) is the non-V2 member of the pair and
     ``getMapInfo_V2`` the V2 one, with the same body and the same kind of
-    answer. ``families.py`` picks the name, so a mower already known to speak
-    V2 is asked with V2 straight away, and the default, non-V2, asks the
-    others with ``getMI`` without a failed request first.
+    answer.
 
-    That this request follows the clean commands' family is an inference from
-    the two mowers seen: the non-V2 A1600 LiDAR Pro (``e4gqia``) answers
-    ``clean`` and ``getMI``, the V2 G1-800 (``77atlz``) answers ``clean_V2``
-    and ``getMapInfo_V2``. What a V2 mower answers to ``getMI`` has not been
-    captured. The fallback assumes ``errno 500``, as for its other non-V2
-    commands; an ack without a push would leave a V2 mower whose family is not
-    known yet without a boundary until the next refresh. The family is per
-    mower, not per command, so a fallback here also moves the clean commands
-    over, which on both mowers seen is the right way.
+    Unlike the other adaptive commands it always asks with ``getMapInfo_V2``
+    first, because both answers to that are known: the V2 G1-800 (``77atlz``)
+    answers it, and the non-V2 A1600 LiDAR Pro (``e4gqia``) rejects it with
+    ``errno 500`` and is then asked with ``getMI``. Starting with ``getMI``
+    would rest on how a V2 mower answers ``getMI``, which nobody has captured:
+    an ack without a push would leave it without a boundary on every restart.
+    The cost is one failed ``getMapInfo_V2`` per map request on a non-V2
+    mower, which runs at setup and on every reconnect.
+
+    A V2 answer commits V2, which the clean commands then use too: on both
+    mowers seen the family is per mower, not per command.
 
     Extends ``GetMI`` for the reason ``GetCleanInfoMower`` extends
     ``GetCleanInfo``: a concrete command to be, with the default name on the
@@ -897,6 +905,9 @@ class GetMapInfoMower(_AdaptiveFamily, GetMI):
 
     def _delegate(self, family: Family) -> Command:
         return self._delegates[family]
+
+    def _first_family(self, did: str) -> Family:
+        return Family.V2
 
 
 class SetRainDelay(ExecuteCommand):

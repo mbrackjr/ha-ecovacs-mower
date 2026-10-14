@@ -906,12 +906,12 @@ own is acknowledged and nothing follows, so the integration sends an `appping`
 first, the way the app does. The mower never answers the ping, and the
 integration does not wait for it.
 
-A mower that has not been seen to speak V2 is asked with `getMI` first. On a
-V2 mower such as the G1-800 that request is expected to go unanswered once,
-logged by `deebot_client` as `No response received for command "getMI"`, after
-which the integration switches to `getMapInfo_V2`, and its clean commands with
-it. If that warning keeps appearing, or the map on a V2 mower loses its
-boundary, report it with the log around it.
+The map request tries `getMapInfo_V2` first. A non-V2 mower does not answer
+it, so `deebot_client` logs `No response received for command "getMapInfo_V2"`
+once after each restart, and again if the mower reconnects, and its map and
+area names arrive about 20 seconds later than they otherwise would. That
+warning is expected on a non-V2 mower. If a V2 mower's map loses its boundary,
+report it with the log around it.
 
 ## Current status
 

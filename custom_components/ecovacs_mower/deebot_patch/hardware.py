@@ -299,12 +299,12 @@ async def patch_device_info(class_: str) -> None:
     # instead, preceded by an appping, with an onMI whose envelope is also the
     # first word on which map is in use, which GetAreaSet waits for;
     # GetMapInfoMower asks under whichever name the mower's family answers.
-    # controller._setup_map subscribes
-    # MowerMapInfoEvent eagerly, so this alone gets the request sent at setup
-    # and again on every reconnect — no new lifecycle code, and no risk of a
-    # command firing before the device exists. The answer is an ack; the
-    # payload lands separately in OnMI or OnMapInfo, which is why this refresh
-    # publishes no event of its own and why that is fine — see GetMapInfoMower.
+    # controller._setup_map subscribes MowerMapInfoEvent eagerly, so this
+    # alone gets the request sent at setup and again on every reconnect — no
+    # new lifecycle code, and no risk of a command firing before the device
+    # exists. The answer is an ack; the payload lands separately in OnMI or
+    # OnMapInfo, which is why this refresh publishes no event of its own and
+    # why that is fine — see GetMapInfoMower.
     events = {
         **patched._events,
         MowerProtectStateEvent: [GetProtectState()],
