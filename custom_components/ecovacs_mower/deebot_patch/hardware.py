@@ -113,6 +113,10 @@ class MowerProfile:
 #            GOAT_INT_O1200_LIDAR_PLUS_NA, and upstream's 0jbd6s.py is
 #            byte-identical to 2i0fns.py, docstring included — so the O1200's
 #            patch applies unchanged, not the O800's.
+#   51rcxt — GOAT A3000 LiDAR Pro (issue #135, firmware 1.13.10 — start,
+#            pause and dock user-verified). Upstream's module is
+#            byte-identical to e4gqia.py, docstring included, so the O800
+#            RTK's patch applies unchanged.
 #
 # Presence in this mapping means the class is supported by the integration.
 # Capability flags are deliberately narrower: they are enabled only where the
@@ -123,6 +127,8 @@ class MowerProfile:
 # How each flag was validated:
 #   area_parameters — e4gqia: raw-to-HA mappings confirmed on the A1600 LiDAR
 #                     Pro; see docs/area-parameter-capability.md.
+#                     51rcxt: the A3000 LiDAR Pro's raw values, read for
+#                     every app setting (issue #131), match the A1600's.
 #   zone_mowing     — e4gqia: the spotArea payload confirmed on the A1600
 #                     LiDAR Pro, firmware 1.11.31 (PR #78); see zonal.py.
 #                     77atlz: two zone runs on the G1-800, firmware 1.36.208,
@@ -137,6 +143,8 @@ class MowerProfile:
 #                     from Home Assistant against that job were all obeyed.
 #                     A start sent from Home Assistant itself has not been
 #                     run yet; it is the same payload on the same topic.
+#                     51rcxt: a zone run started from Home Assistant on the
+#                     A3000 LiDAR Pro mowed the area asked for (issue #135).
 #   border_mowing   — 77atlz: the app's border-job request captured on the
 #                     G1-800, firmware 1.36.208 (issue #12): clean_V2 with
 #                     {"type": "border", "value": "mid:<mid>"}, acknowledged
@@ -153,6 +161,7 @@ SUPPORTED_CLASSES: dict[str, MowerProfile] = {
     "o4kvvk": MowerProfile("o4kvvk"),
     "6n9pcz": MowerProfile("6n9pcz"),
     "0jbd6s": MowerProfile("0jbd6s"),
+    "51rcxt": MowerProfile("51rcxt", area_parameters=True, zone_mowing=True),
 }
 
 

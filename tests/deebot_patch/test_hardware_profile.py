@@ -20,19 +20,20 @@ def test_supported_classes_are_capability_profiles() -> None:
 
 def test_area_parameters_are_enabled_only_for_validated_class() -> None:
     """Area-parameter semantics are not inferred from protocol field names."""
-    assert profile_for_class("e4gqia") is not None
-    assert profile_for_class("e4gqia").area_parameters is True
+    for class_ in ("e4gqia", "51rcxt"):
+        assert profile_for_class(class_) is not None
+        assert profile_for_class(class_).area_parameters is True
 
     for class_ in SUPPORTED_CLASSES:
-        if class_ != "e4gqia":
+        if class_ not in ("e4gqia", "51rcxt"):
             assert profile_for_class(class_).area_parameters is False
 
 
 def test_zone_mowing_is_enabled_only_for_validated_class() -> None:
-    """The spotArea payload is confirmed on the A1600 LiDAR Pro, G1-800 and O1200."""
+    """spotArea is confirmed on the A1600/A3000 LiDAR Pro, G1-800 and O1200."""
     assert {
         class_ for class_, profile in SUPPORTED_CLASSES.items() if profile.zone_mowing
-    } == {"e4gqia", "77atlz", "2i0fns"}
+    } == {"e4gqia", "77atlz", "2i0fns", "51rcxt"}
 
 
 def test_profile_flags_default_to_off() -> None:

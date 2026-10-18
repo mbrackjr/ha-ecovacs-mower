@@ -79,7 +79,7 @@ sniffing the traffic again. Much of it already exists in this integration —
 the mowing-progress sensor, the rain-delay switch and number, the volume
 number and the map decoding all cover the same ground — and what remains is:
 
-- [DeebotUniverse/client.py#1774](https://github.com/DeebotUniverse/client.py/pull/1774) — the names of the saved mowing areas, from `getAreaSet` with `type: "ar"`, on every model. Here they are read only on the A1600 LiDAR Pro, for its per-area parameter entities (see below), and the `mow_area` service takes area ids only.
+- [DeebotUniverse/client.py#1774](https://github.com/DeebotUniverse/client.py/pull/1774) — the names of the saved mowing areas, from `getAreaSet` with `type: "ar"`, on every model. Here they are read only on the A1600 and A3000 LiDAR Pro, for their per-area parameter entities (see below), and the `mow_area` service takes area ids only.
 - [DeebotUniverse/client.py#1778](https://github.com/DeebotUniverse/client.py/pull/1778) — the remaining global settings as settable values: animal protection with its schedule, AI recognition, smart mowing with avoidance, narrow-passage adaptation and the lifted-alarm volume. Here animal protection can be switched on and off, and its window is shown but not editable; the rest exist only as the read-only protection flags.
 
 
@@ -114,6 +114,7 @@ merely that the class string was seen:
 | **Ecovacs GOAT A3000 LiDAR** | `o4kvvk` | reported working unpatched, patch not yet confirmed — firmware 1.13.31 ([#106](https://github.com/nord-/ha-ecovacs-mower/issues/106)) |
 | **Ecovacs GOAT O600 RTK** | `6n9pcz` | reported, patch not yet confirmed ([#103](https://github.com/nord-/ha-ecovacs-mower/issues/103)) |
 | **Ecovacs GOAT O1000 LiDAR Pro** | `0jbd6s` | reported, patch not yet confirmed — firmware 2.13.10 ([#102](https://github.com/nord-/ha-ecovacs-mower/issues/102)). Ecovacs identifies it internally as an O1200 LiDAR Plus, and it gets the O1200's capabilities |
+| **Ecovacs GOAT A3000 LiDAR Pro** | `51rcxt` | a user, firmware 1.13.10 — controls and zone mowing confirmed ([#135](https://github.com/nord-/ha-ecovacs-mower/issues/135)); per-area parameters match the A1600 LiDAR Pro's ([#131](https://github.com/nord-/ha-ecovacs-mower/issues/131)) |
 
 The A1600 ships as two machines, and they report different device classes:
 the LiDAR Pro is `e4gqia`, the RTK is `xmp9ds`. Both rows above are real, and
@@ -227,7 +228,7 @@ above), that loop returns for the vacuum.
 Forty-four fixed entities on the mower's device page, across eight platforms —
 forty-five on the G1-800, which alone gets the "Mow border" button — plus four
 writable entities per saved mowing area on the A1600 LiDAR Pro (`e4gqia`) and
-one per UWB beacon on the models that use them:
+A3000 LiDAR Pro (`51rcxt`), and one per UWB beacon on the models that use them:
 
 | Platform | Count | What |
 |---|---|---|
@@ -235,7 +236,7 @@ one per UWB beacon on the models that use them:
 | `sensor` | 16 + one per beacon | Activity (the mower's state with the reason folded in — `returning_rain`, `docked_rain_delay`; see below), battery, error code (disabled by default — see below), mowing progress (see below), job target area, job target duration, three lifetime totals (area, time, session count), four consumable-lifespan percentages (blade, lens brush, trimmer brush, weed rope), IP address, Wi-Fi signal strength, Wi-Fi network name, and on a beacon-guided mower one battery percentage per UWB beacon (see below) |
 | `binary_sensor` | 6 | Fault — a latched problem that stays on until the mower recovers or you clear it (see below) — plus rain sensor, rain delay, emergency stop, locked, animal protection active: the mower's raw protection flags, from the `onProtectState` message the library drops (see below) |
 | `switch` | 9 | Advanced mode, TrueDetect obstacle avoidance, edge cutting, child lock, lift warning, boundary crossing warning, safety protection, rain detection, animal protection (see below) |
-| `number` | 3 + four per saved area on the A1600 LiDAR Pro | Notification volume, cutting direction, rain delay duration, plus cutting height, mowing speed, obstacle height and cutting direction for each saved area (see below) |
+| `number` | 3 + four per saved area on the A1600 and A3000 LiDAR Pro | Notification volume, cutting direction, rain delay duration, plus cutting height, mowing speed, obstacle height and cutting direction for each saved area (see below) |
 | `button` | 7, 8 on the G1-800 | Reset each of the four consumable lifespans, "Locate mower" (plays a sound on the device), "Clear fault" (releases the latched fault; see below), "End mowing task" (ends the current job for good; see below) and, on the G1-800, "Mow border" (starts a border job; see below) |
 | `event` | 1 | Last mowing job (finished / finished with warnings / manually stopped — see below) |
 | `image` | 1 | The mower's map — lawn boundary, mowed coverage, no-go zones, detected obstacles, the dock and the mower's live position track. Add it to a dashboard with a `picture-entity` card. Decoded from the GOAT's own map messages (`onMI`/`onArI`/`onMapTrack`/`onSpecialContour`, `onMapTrace` on firmware 1.17, and `onMapInfo_V2` on 1.36 — that last one only ever arrives in answer to a `getMapInfo_V2` the integration now sends); see `map.py` and `deebot_patch/map_messages.py` for the decoding. Geometry survives restarts; the position track is live-only. The mower's position, its heading, the dock and the path it has driven are also attributes of the entity (`position_x`, `position_y`, `heading`, `dock_x`, `dock_y`, `track`) — millimetres in the map's own frame, with the dock as the origin, `heading` in degrees as the mower reports it (counter-clockwise from the frame's +x axis, measured on the G1-800 at firmware 1.36.208 only), and `track` a list of `[x, y]` points thinned to at most about 250 — so a card can draw the mower on something other than the SVG. `position_x`, `position_y` and `heading` are `null` until the mower has reported a position since Home Assistant started |
@@ -293,11 +294,12 @@ shows up as a warning every 15 seconds in the log.
 The `ecovacs_mower.mow_area` service starts a mowing job for one or more
 specified zone IDs using the mower's `spotArea` command.
 
-Zone mowing is currently confirmed on the A1600 LiDAR Pro (`e4gqia`) and the
-G1-800 (`77atlz`), and enabled on the O1200 LiDAR Pro (`2i0fns`), where the
-app's own zone start was captured and matches what the service sends. If you
-have another mower class, zone mowing is not yet verified on that hardware;
-please report the device class in a new issue if you test it.
+Zone mowing is currently confirmed on the A1600 LiDAR Pro (`e4gqia`), the
+A3000 LiDAR Pro (`51rcxt`) and the G1-800 (`77atlz`), and enabled on the O1200
+LiDAR Pro (`2i0fns`), where the app's own zone start was captured and matches
+what the service sends. If you have another mower class, zone mowing is not
+yet verified on that hardware; please report the device class in a new issue
+if you test it.
 
 The service requires a mower entity as its target and accepts one or more
 integer `area_ids` between `0` and `999`:
@@ -334,9 +336,10 @@ range does not imply that the mower has a zone with that ID.
 
 ### Per-area mowing parameters
 
-The A1600 LiDAR Pro (`e4gqia`) also exposes the settings stored for each
-saved mowing area. The integration discovers the mower's current area IDs and
-names at runtime and creates four writable `number` entities for each area:
+The A1600 LiDAR Pro (`e4gqia`) and A3000 LiDAR Pro (`51rcxt`) also expose
+the settings stored for each saved mowing area. The integration discovers the
+mower's current area IDs and names at runtime and creates four writable
+`number` entities for each area:
 
 | Setting | Home Assistant value |
 |---|---|
@@ -377,7 +380,7 @@ Assistant's "Update entity" action (`homeassistant.update_entity`) on any of
 the area entities, without needing a reload.
 
 These parameter mappings are currently confirmed only on the A1600 LiDAR Pro
-(`e4gqia`). The raw Ecovacs fields have the same names on other mower models,
+(`e4gqia`) and A3000 LiDAR Pro (`51rcxt`). Other models use the same fields,
 but that does not establish that their ranges, units or meanings are the same.
 The integration therefore does not expose these controls on other classes until
 their parameter representation has been independently verified.

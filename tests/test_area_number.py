@@ -447,13 +447,15 @@ async def test_no_area_entities_for_a_vacuum() -> None:
     device.events.subscribe.assert_not_called()
 
 
-async def test_the_validated_mower_gets_area_discovery() -> None:
+@pytest.mark.parametrize("class_", ["e4gqia", "51rcxt"])
+async def test_the_validated_mower_gets_area_discovery(class_) -> None:
     from deebot_client.capabilities import DeviceType
 
     from custom_components.ecovacs_mower.area_numbers import async_setup_area_numbers
     from custom_components.ecovacs_mower.deebot_patch.areas import MowerAreaEvent
 
     device = _device()
+    device.device_info["class"] = class_
     device.capabilities.device_type = DeviceType.MOWER
 
     await async_setup_area_numbers(_entry_with(device), MagicMock())

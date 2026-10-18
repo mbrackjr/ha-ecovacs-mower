@@ -62,6 +62,10 @@ O600 = "6n9pcz"
 # its upstream module is byte-identical to the O1200's 2i0fns.py, not to
 # 9bts2s.py — the cloud calls it an O1200 LiDAR Plus internally.
 O1000_LIDAR = "0jbd6s"
+# A ninth, a GOAT A3000 LiDAR Pro (issue #135); upstream's module is
+# byte-identical to e4gqia.py, docstring included. Not the A3000 LiDAR above:
+# _LIDAR_PRO and _LIDAR are different machines.
+A3000_LIDAR_PRO = "51rcxt"
 
 
 def test_supported_classes_are_the_ones_we_patch() -> None:
@@ -77,6 +81,7 @@ def test_supported_classes_are_the_ones_we_patch() -> None:
         A3000_LIDAR,
         O600,
         O1000_LIDAR,
+        A3000_LIDAR_PRO,
     }
 
 

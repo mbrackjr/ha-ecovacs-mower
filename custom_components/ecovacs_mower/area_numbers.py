@@ -8,10 +8,11 @@ existing beacon sensors.
 Model- and firmware-specific conversion from raw device values to
 human-sensible Home Assistant values lives exclusively in this HA layer. The
 A1600 LiDAR Pro findings that established these mappings are deliberately scoped
-to that model: the values have not been verified on the other mower classes
-supported by this integration.
+to that model and to the A3000 LiDAR Pro, whose own readings matched them: the
+values have not been verified on the other mower classes supported by this
+integration.
 
-The four parameter views are writable on the validated A1600 model. Each write
+The four parameter views are writable on the validated models. Each write
 is converted back to raw protocol values and merged with the other three
 values — from the area's last reported snapshot, or from this area's own
 accepted write that the mower has not reported back yet (see
@@ -209,6 +210,14 @@ _A1600_CUT_ANGLE = AreaParameterFormula(
 # mappings; no model-specific ranges belong in ``area_number_descriptions``.
 AREA_PARAMETER_MAPPINGS: dict[str, AreaParameterMapping] = {
     "e4gqia": AreaParameterMapping(
+        mow_height=_A1600_MOW_HEIGHT,
+        cut_speed=_A1600_CUT_SPEED,
+        obstacle_height=_A1600_OBSTACLE_HEIGHT,
+        cut_angle=_A1600_CUT_ANGLE,
+    ),
+    # The A3000 LiDAR Pro's own readings (issue #131) matched the A1600's at
+    # every raw value, so it shares the A1600's tables rather than a copy.
+    "51rcxt": AreaParameterMapping(
         mow_height=_A1600_MOW_HEIGHT,
         cut_speed=_A1600_CUT_SPEED,
         obstacle_height=_A1600_OBSTACLE_HEIGHT,
