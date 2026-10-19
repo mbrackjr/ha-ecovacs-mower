@@ -32,10 +32,12 @@ from deebot_client.capabilities import DeviceType
 from deebot_client.device import Device
 
 from homeassistant.components.number import (
+    NumberDeviceClass,
     NumberEntity,
     NumberEntityDescription,
     NumberMode,
 )
+from homeassistant.components.number.const import UNIT_CONVERTERS
 from homeassistant.const import DEGREE, EntityCategory, UnitOfLength, UnitOfSpeed
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -51,6 +53,38 @@ from .deebot_patch.areas import (
 from .deebot_patch.commands import SetAreaParameter
 from .deebot_patch.hardware import profile_for_class
 from .entity import EcovacsDescriptionEntity
+
+# --- TEST ONLY (test/number-step-units, never merge) -------------------------
+# Emulates a possible upstream Home Assistant fix: convert a number's step along
+# with its min/max/state when the entity settings show another unit. Patches a
+# private HA method for every number entity until HA restarts.
+if not getattr(NumberEntity, "_ecovacs_test_step_patch", False):
+    _orig_calculate_step = NumberEntity._calculate_step
+
+    def _calculate_step(self, min_value: float, max_value: float) -> float:
+        step = _orig_calculate_step(self, min_value, max_value)
+        native = self.native_unit_of_measurement
+        shown = self.unit_of_measurement
+        if (
+            self.native_step is None
+            or self.device_class not in UNIT_CONVERTERS
+            or not native
+            or not shown
+            or native == shown
+        ):
+            return step
+        convert = UNIT_CONVERTERS[self.device_class].converter_factory(native, shown)
+        # A difference, so it also holds for an offset unit (1 °C step = 1.8 °F).
+        return abs(convert(step) - convert(0))
+
+    NumberEntity._calculate_step = _calculate_step
+    NumberEntity._ecovacs_test_step_patch = True
+
+
+def _as_float(value: float | int | None) -> float | None:
+    """TEST: a float keeps one decimal after HA's unit conversion (9 -> 3.5 in)."""
+    return None if value is None else float(value)
+# --- END TEST ----------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -348,7 +382,7 @@ def area_number_descriptions(
             "cutting_height",
             "Cutting height",
             "mow_height_level",
-            lambda area: area_mapping.mow_height.to_native(area.mow_height_level)
+            lambda area: _as_float(area_mapping.mow_height.to_native(area.mow_height_level))
             if area.mow_height_level is not None
             else None,
             area_mapping.mow_height.to_raw,
@@ -356,6 +390,7 @@ def area_number_descriptions(
             native_max_value=area_mapping.mow_height.native_max_value,
             native_step=area_mapping.mow_height.native_step,
             native_unit_of_measurement=UnitOfLength.CENTIMETERS,
+            device_class=NumberDeviceClass.DISTANCE,  # TEST
             icon="mdi:grass",
         ),
         area_number_description(
@@ -363,7 +398,7 @@ def area_number_descriptions(
             "mowing_speed",
             "Mowing speed",
             "cut_mode",
-            lambda area: area_mapping.cut_speed.to_native(area.cut_mode)
+            lambda area: _as_float(area_mapping.cut_speed.to_native(area.cut_mode))
             if area.cut_mode is not None
             else None,
             area_mapping.cut_speed.to_raw,
@@ -371,6 +406,7 @@ def area_number_descriptions(
             native_max_value=area_mapping.cut_speed.native_max_value,
             native_step=area_mapping.cut_speed.native_step,
             native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
+            device_class=NumberDeviceClass.SPEED,  # TEST
             icon="mdi:speedometer",
         ),
         area_number_description(
@@ -378,7 +414,7 @@ def area_number_descriptions(
             "obstacle_height",
             "Obstacle height",
             "obstacle_height",
-            lambda area: area_mapping.obstacle_height.to_native(area.obstacle_height)
+            lambda area: _as_float(area_mapping.obstacle_height.to_native(area.obstacle_height))
             if area.obstacle_height is not None
             else None,
             area_mapping.obstacle_height.to_raw,
@@ -386,6 +422,7 @@ def area_number_descriptions(
             native_max_value=area_mapping.obstacle_height.native_max_value,
             native_step=area_mapping.obstacle_height.native_step,
             native_unit_of_measurement=UnitOfLength.CENTIMETERS,
+            device_class=NumberDeviceClass.DISTANCE,  # TEST
             icon="mdi:format-vertical-align-top",
         ),
         area_number_description(
