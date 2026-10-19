@@ -148,9 +148,16 @@ class MowerProfile:
 #   border_mowing   — 77atlz: the app's border-job request captured on the
 #                     G1-800, firmware 1.36.208 (issue #12): clean_V2 with
 #                     {"type": "border", "value": "mid:<mid>"}, acknowledged
-#                     code 0. Only the V2 shape is captured; the non-V2 one is
-#                     a guess nobody has tested, which is why no non-V2 class
-#                     has the flag — see border.py.
+#                     code 0.
+#                     51rcxt: the first non-V2 class with the flag. Started
+#                     from Home Assistant on the A3000 LiDAR Pro, firmware
+#                     1.13.10 (issue #135), the border job set its target
+#                     area and duration, its progress reached 100 and the
+#                     "Last mowing job" event fired finished. The app's own
+#                     job starts go out on clean and its state arrives as
+#                     onCleanInfo, so the start went out in the non-V2 shape
+#                     — see border.py. The app offers no border job on this
+#                     model, only its trimming job (borderrotate, issue #138).
 SUPPORTED_CLASSES: dict[str, MowerProfile] = {
     "2i0fns": MowerProfile("2i0fns", zone_mowing=True),
     "9bts2s": MowerProfile("9bts2s"),
@@ -161,7 +168,9 @@ SUPPORTED_CLASSES: dict[str, MowerProfile] = {
     "o4kvvk": MowerProfile("o4kvvk"),
     "6n9pcz": MowerProfile("6n9pcz"),
     "0jbd6s": MowerProfile("0jbd6s"),
-    "51rcxt": MowerProfile("51rcxt", area_parameters=True, zone_mowing=True),
+    "51rcxt": MowerProfile(
+        "51rcxt", area_parameters=True, zone_mowing=True, border_mowing=True
+    ),
 }
 
 

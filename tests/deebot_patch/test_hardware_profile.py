@@ -3,7 +3,6 @@
 from custom_components.ecovacs_mower.deebot_patch.hardware import (
     SUPPORTED_CLASSES,
     MowerProfile,
-    profile_for_class,
 )
 
 
@@ -18,15 +17,13 @@ def test_supported_classes_are_capability_profiles() -> None:
     )
 
 
-def test_area_parameters_are_enabled_only_for_validated_class() -> None:
+def test_area_parameters_are_enabled_only_for_validated_classes() -> None:
     """Area-parameter semantics are not inferred from protocol field names."""
-    for class_ in ("e4gqia", "51rcxt"):
-        assert profile_for_class(class_) is not None
-        assert profile_for_class(class_).area_parameters is True
-
-    for class_ in SUPPORTED_CLASSES:
-        if class_ not in ("e4gqia", "51rcxt"):
-            assert profile_for_class(class_).area_parameters is False
+    assert {
+        class_
+        for class_, profile in SUPPORTED_CLASSES.items()
+        if profile.area_parameters
+    } == {"e4gqia", "51rcxt"}
 
 
 def test_zone_mowing_is_enabled_only_for_validated_class() -> None:

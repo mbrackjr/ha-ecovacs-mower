@@ -154,9 +154,11 @@ class AreaParameterMapping:
 
 
 # The following three tables are the A1600 LiDAR Pro's validated HA
-# representations. Each tuple position corresponds to a raw value beginning at
-# one. The tuple is therefore the single source of truth for conversion in both
-# directions and for the HA number entity's min/max/step metadata.
+# representations, which the A3000 LiDAR Pro shares through ``_A1600_MAPPING``:
+# a change made on new A1600 evidence changes both models, so it needs
+# evidence from both. Each tuple position corresponds to a raw value beginning
+# at one. The tuple is therefore the single source of truth for conversion in
+# both directions and for the HA number entity's min/max/step metadata.
 _A1600_MOW_HEIGHT = AreaParameterLookup(
     values=(9, 8, 7, 6, 5, 4, 3),
 )
@@ -173,9 +175,9 @@ _A1600_OBSTACLE_HEIGHT = AreaParameterLookup(
 def _a1600_cut_angle(wire_angle: int) -> int | None:
     """Convert the A1600 wire-space angle to the app-space angle.
 
-    Confirmed on the A1600 LiDAR Pro specifically. The observed symmetric
-    conversion is ``app = (270 - wire) mod 360``; the same formula converts the
-    app value back to wire space.
+    Confirmed on the A1600 LiDAR Pro and the A3000 LiDAR Pro. The observed
+    symmetric conversion is ``app = (270 - wire) mod 360``; the same formula
+    converts the app value back to wire space.
     """
     if wire_angle not in range(360):
         return None
@@ -197,6 +199,13 @@ _A1600_CUT_ANGLE = AreaParameterFormula(
     native_step=1,
 )
 
+_A1600_MAPPING = AreaParameterMapping(
+    mow_height=_A1600_MOW_HEIGHT,
+    cut_speed=_A1600_CUT_SPEED,
+    obstacle_height=_A1600_OBSTACLE_HEIGHT,
+    cut_angle=_A1600_CUT_ANGLE,
+)
+
 
 # These mappings are presentation semantics, not protocol semantics. Keep them
 # in the HA layer and add a class only after its raw-value representation has
@@ -209,20 +218,11 @@ _A1600_CUT_ANGLE = AreaParameterFormula(
 # generic entity code below derives conversion and number limits from these
 # mappings; no model-specific ranges belong in ``area_number_descriptions``.
 AREA_PARAMETER_MAPPINGS: dict[str, AreaParameterMapping] = {
-    "e4gqia": AreaParameterMapping(
-        mow_height=_A1600_MOW_HEIGHT,
-        cut_speed=_A1600_CUT_SPEED,
-        obstacle_height=_A1600_OBSTACLE_HEIGHT,
-        cut_angle=_A1600_CUT_ANGLE,
-    ),
+    "e4gqia": _A1600_MAPPING,
     # The A3000 LiDAR Pro's own readings (issue #131) matched the A1600's at
-    # every raw value, so it shares the A1600's tables rather than a copy.
-    "51rcxt": AreaParameterMapping(
-        mow_height=_A1600_MOW_HEIGHT,
-        cut_speed=_A1600_CUT_SPEED,
-        obstacle_height=_A1600_OBSTACLE_HEIGHT,
-        cut_angle=_A1600_CUT_ANGLE,
-    ),
+    # every raw value, and writes from Home Assistant landed as the app shows
+    # them (PR #137), so it shares the A1600's mapping rather than a copy.
+    "51rcxt": _A1600_MAPPING,
 }
 
 

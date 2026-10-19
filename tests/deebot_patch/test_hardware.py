@@ -567,14 +567,16 @@ async def test_patch_preserves_the_other_life_span_capabilities(class_: str) -> 
     assert after.capabilities.life_span.event is event_before
 
 
-def test_border_mowing_is_flagged_on_the_classes_with_a_captured_request() -> None:
+def test_border_mowing_is_flagged_on_the_classes_where_it_was_confirmed() -> None:
     # The flag means "the border request shape is confirmed on this class",
     # not "we patch it" — the opposite sense from membership in
-    # SUPPORTED_CLASSES. Only the G1-800 has a capture (issue #12).
+    # SUPPORTED_CLASSES. The G1-800 has the app's request captured (issue
+    # #12); the A3000 LiDAR Pro ran a border job started from Home Assistant
+    # to completion (issue #135).
     from custom_components.ecovacs_mower.deebot_patch import hardware
 
     assert {
         class_
         for class_, profile in hardware.SUPPORTED_CLASSES.items()
         if profile.border_mowing
-    } == {G1_800}
+    } == {G1_800, A3000_LIDAR_PRO}
