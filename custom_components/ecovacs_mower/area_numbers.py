@@ -8,9 +8,9 @@ existing beacon sensors.
 Model- and firmware-specific conversion from raw device values to
 human-sensible Home Assistant values lives exclusively in this HA layer. The
 A1600 LiDAR Pro findings that established these mappings are deliberately scoped
-to that model and to the A3000 LiDAR Pro, whose own readings matched them: the
-values have not been verified on the other mower classes supported by this
-integration.
+to that model and to the A3000 LiDAR Pro, whose own readings matched them; the
+O1200 LiDAR Pro has its own height and speed tables. The values have not been
+verified on the other mower classes supported by this integration.
 
 The four parameter views are writable on the validated models. Each write
 is converted back to raw protocol values and merged with the other three
@@ -226,6 +226,21 @@ _A1600_CUT_ANGLE = AreaParameterFormula(
     native_step=1,
 )
 
+# The O1200 LiDAR Pro's own readings (issue #131). Its height runs in half
+# centimetres, from raw 1 = 8 cm down to raw 11 = 3 cm: raw 1 and 8-11 were
+# read, raw 2-7 follow the same steps. Its app offers only two speeds, so only
+# those two raw values exist here: raw 5 and 6, in between, are never written.
+_O1200_MOW_HEIGHT = AreaParameterLookup(
+    {
+        1: 8.0, 2: 7.5, 3: 7.0, 4: 6.5, 5: 6.0, 6: 5.5,
+        7: 5.0, 8: 4.5, 9: 4.0, 10: 3.5, 11: 3.0,
+    },
+)
+
+_O1200_CUT_SPEED = AreaParameterLookup(
+    {4: 0.50, 7: 0.35},
+)
+
 _A1600_MAPPING = AreaParameterMapping(
     mow_height=_A1600_MOW_HEIGHT,
     cut_speed=_A1600_CUT_SPEED,
@@ -250,6 +265,14 @@ AREA_PARAMETER_MAPPINGS: dict[str, AreaParameterMapping] = {
     # every raw value, and writes from Home Assistant landed as the app shows
     # them (PR #137), so it shares the A1600's mapping rather than a copy.
     "51rcxt": _A1600_MAPPING,
+    # The O1200 LiDAR Pro's obstacle heights and directions matched the A1600's
+    # (issue #131); its heights and speeds did not, so those are its own.
+    "2i0fns": AreaParameterMapping(
+        mow_height=_O1200_MOW_HEIGHT,
+        cut_speed=_O1200_CUT_SPEED,
+        obstacle_height=_A1600_OBSTACLE_HEIGHT,
+        cut_angle=_A1600_CUT_ANGLE,
+    ),
 }
 
 
