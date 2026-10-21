@@ -62,8 +62,9 @@ from __future__ import annotations
 
 from abc import ABC
 import asyncio
+from dataclasses import dataclass
 import logging
-from datetime import time
+from datetime import UTC, datetime, time
 from typing import TYPE_CHECKING, Any
 
 from deebot_client.command import Command
@@ -76,14 +77,16 @@ from deebot_client.commands.json.clean import (
 )
 from deebot_client.commands.json.common import (
     ExecuteCommand,
+    JsonCommandMqttP2P,
     JsonCommandWithMessageHandling,
 )
 from deebot_client.commands.json.custom import CustomCommand
+from deebot_client.commands.json.cut_direction import SetCutDirection
 from deebot_client.commands.json.life_span import GetLifeSpan
 from deebot_client.commands.json.pos import GetPos
 from deebot_client.commands.json.stats import GetStats
 from deebot_client.const import DataType
-from deebot_client.events import LifeSpan, StateEvent
+from deebot_client.events import Event, LifeSpan, StateEvent
 from deebot_client.message import HandlingResult, HandlingState
 from deebot_client.models import CleanAction, CleanMode, State
 import orjson
@@ -1144,6 +1147,112 @@ class SetAreaParameter(ExecuteCommand):
                 "angle": angle,
             }
         )
+
+
+
+@dataclass(frozen=True)
+class MowerWriteEvent(Event):
+    """A setting another client wrote, once the mower has answered it.
+
+    For the diagnostic button: the app is the reference for what a model
+    accepts, and its request is the only place that shows which keys it sends
+    (an ``angle`` or not). ``data`` is the request's ``body.data`` as JSON, in
+    the key order it arrived in; ``code`` is the mower's answer, 0 for
+    accepted. ``at`` keeps two identical writes apart, which the bus would
+    otherwise drop as a repeat, and lets a later subscriber tell an old one
+    from a new one.
+    """
+
+    command: str
+    data: str
+    channel: str | None
+    code: int | None
+    at: datetime
+
+
+@dataclass(frozen=True)
+class _Observed:
+    data: str
+    channel: str | None
+
+
+def _observe(payload: str | bytes | bytearray) -> tuple[dict[str, Any], _Observed]:
+    """The request's data, and what of it to report once the mower answers."""
+    message = orjson.loads(payload)
+    data = message["body"]["data"]
+    observed = _Observed(
+        orjson.dumps(data).decode(), message.get("header", {}).get("channel")
+    )
+    return data, observed
+
+
+def _notify_write(
+    event_bus: EventBus, command: str, observed: _Observed, response: dict[str, Any]
+) -> None:
+    body = response.get("body", {})
+    event_bus.notify(
+        MowerWriteEvent(
+            command,
+            observed.data,
+            observed.channel,
+            body.get("code") if isinstance(body, dict) else None,
+            datetime.now(UTC),
+        )
+    )
+
+
+class ObservedAreaParameterWrite(ExecuteCommand, JsonCommandMqttP2P):
+    """``setAreaParameter`` as another client sends it, never sent from here.
+
+    The library drops a p2p request it has no command for. Registered in its
+    p2p table by ``apply()``, this one keeps the request and publishes it as a
+    ``MowerWriteEvent`` when the mower answers. It changes no state:
+    ``onAreaParameter`` still delivers what the mower stores. Writes from
+    Home Assistant use ``SetAreaParameter``.
+    """
+
+    NAME = SetAreaParameter.NAME
+
+    _observed: _Observed
+
+    @classmethod
+    def create_from_mqtt(
+        cls, payload: str | bytes | bytearray
+    ) -> ObservedAreaParameterWrite:
+        """Keep the request as it arrived."""
+        data, observed = _observe(payload)
+        command = cls(data)
+        command._observed = observed
+        return command
+
+    def _handle_mqtt_p2p(self, event_bus: EventBus, response: dict[str, Any]) -> None:
+        _notify_write(event_bus, self.NAME, self._observed, response)
+
+
+class ObservedCutDirectionWrite(SetCutDirection):
+    """The library's ``setCutDirection`` p2p handling, plus a ``MowerWriteEvent``.
+
+    Replaces the library's entry in its p2p table, so it must keep doing what
+    that one does: the parent publishes the ``CutDirectionEvent`` the
+    device-level cutting direction follows. The parent keeps only ``angle``;
+    the request as sent is kept beside it.
+    """
+
+    _observed: _Observed
+
+    @classmethod
+    def create_from_mqtt(
+        cls, payload: str | bytes | bytearray
+    ) -> ObservedCutDirectionWrite:
+        """Parse as the library does, keeping the request as it arrived."""
+        data, observed = _observe(payload)
+        command = cls._create_from_mqtt(data)
+        command._observed = observed
+        return command
+
+    def _handle_mqtt_p2p(self, event_bus: EventBus, response: dict[str, Any]) -> None:
+        super()._handle_mqtt_p2p(event_bus, response)
+        _notify_write(event_bus, self.NAME, self._observed, response)
 
 
 class GetStatsMower(GetStats):

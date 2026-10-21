@@ -324,3 +324,58 @@ async def test_removing_the_button_mid_window_says_it_stopped(hass) -> None:
     assert _shown(notify).startswith("Stopped.")
     assert notify.call_count == written
     assert [c.NAME for c in sent] == ["getAreaParameter"]
+
+
+def _write(command="setAreaParameter", data='{"areaID":"1","angle":227}', code=0, at=None):
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.ecovacs_mower.deebot_patch.commands import MowerWriteEvent
+
+    return MowerWriteEvent(command, data, "iOS", code, at or dt_util.utcnow())
+
+
+async def test_the_first_accepted_write_of_each_is_shown_at_the_top(hass) -> None:
+    from custom_components.ecovacs_mower.debug import AreaParameterLog
+
+    device = _device()
+    execute, _ = _answering(device, _event(_FRONT))
+    log = AreaParameterLog(hass, device, execute)
+
+    with patch(_NOTIFY) as notify:
+        await log.async_start()
+        device.events.notify(_write(code=3))
+        await _settle()
+        device.events.notify(_write())
+        await _settle()
+        device.events.notify(_write(data='{"areaID":"1","angle":90}'))
+        device.events.notify(_write("setCutDirection", '{"angle":63}'))
+        await _settle()
+
+    message = _shown(notify)
+    assert '`setAreaParameter {"areaID":"1","angle":227}` (iOS): accepted' in message
+    assert '"angle":90' not in message
+    assert "refused" not in message
+    assert '`setCutDirection {"angle":63}` (iOS): accepted' in message
+    assert message.index("Written to the mower") < message.index("| Area |")
+    log.async_shutdown()
+
+
+async def test_a_write_from_before_the_press_is_not_shown(hass) -> None:
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.ecovacs_mower.debug import AreaParameterLog
+
+    device = _device()
+    device.events.notify(_write(at=dt_util.utcnow() - timedelta(minutes=1)))
+    await _settle()
+    execute, _ = _answering(device, _event(_FRONT))
+    log = AreaParameterLog(hass, device, execute)
+
+    with patch(_NOTIFY) as notify:
+        await log.async_start()
+        await _settle()
+
+    assert "Written to the mower" not in _shown(notify)
+    log.async_shutdown()

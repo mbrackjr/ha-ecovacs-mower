@@ -1396,3 +1396,63 @@ async def test_start_stays_start_after_work_complete() -> None:
         await command._execute(AsyncMock(), _DEVICE_INFO, bus)
 
     assert command._delegate(Family.NON_V2)._args["act"] == "start"
+
+
+# The app's request and the mower's answer, as captured on an A1600 LiDAR Pro.
+_APP_AREA_WRITE = (
+    b'{"body":{"data":{"cutMode":7,"areaID":"2","obstacleHeight":1,'
+    b'"mowHeightLevel":6,"angle":227}},"header":{"channel":"iOS","m":"request"}}'
+)
+_ACCEPTED = b'{"header":{"fwVer":"1.13.10"},"body":{"code":0,"msg":"ok"}}'
+
+
+def test_an_app_area_write_is_published_as_sent() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.commands import (
+        MowerWriteEvent,
+        ObservedAreaParameterWrite,
+    )
+
+    bus = Mock()
+    command = ObservedAreaParameterWrite.create_from_mqtt(_APP_AREA_WRITE)
+    command.handle_mqtt_p2p(bus, _ACCEPTED)
+
+    (event,) = (c.args[0] for c in bus.notify.call_args_list)
+    assert isinstance(event, MowerWriteEvent)
+    assert event.command == "setAreaParameter"
+    # Verbatim, key order included: which keys the app sends is the point.
+    assert event.data == (
+        '{"cutMode":7,"areaID":"2","obstacleHeight":1,"mowHeightLevel":6,"angle":227}'
+    )
+    assert (event.channel, event.code) == ("iOS", 0)
+
+
+def test_an_app_cut_direction_write_still_updates_the_device_entity() -> None:
+    from deebot_client.events import CutDirectionEvent
+
+    from custom_components.ecovacs_mower.deebot_patch.commands import (
+        MowerWriteEvent,
+        ObservedCutDirectionWrite,
+    )
+
+    bus = Mock()
+    command = ObservedCutDirectionWrite.create_from_mqtt(
+        b'{"body":{"data":{"angle":63}},"header":{"channel":"Android"}}'
+    )
+    command.handle_mqtt_p2p(bus, _ACCEPTED)
+
+    events = [c.args[0] for c in bus.notify.call_args_list]
+    assert CutDirectionEvent(63) in events
+    assert isinstance(events[-1], MowerWriteEvent)
+    assert (events[-1].command, events[-1].data) == ("setCutDirection", '{"angle":63}')
+
+
+def test_a_refused_write_carries_its_code() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.commands import (
+        ObservedAreaParameterWrite,
+    )
+
+    bus = Mock()
+    command = ObservedAreaParameterWrite.create_from_mqtt(_APP_AREA_WRITE)
+    command.handle_mqtt_p2p(bus, b'{"body":{"code":3,"msg":"fail"}}')
+
+    assert bus.notify.call_args.args[0].code == 3

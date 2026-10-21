@@ -12,6 +12,8 @@ import logging
 from typing import NoReturn
 
 from deebot_client.capabilities import Capabilities
+from deebot_client.commands import COMMANDS_WITH_MQTT_P2P_HANDLING
+from deebot_client.const import DataType
 from deebot_client.events import StateEvent
 from deebot_client.hardware import _DEVICES
 from deebot_client.messages.json import MESSAGES
@@ -24,6 +26,8 @@ from .commands import (
     GetAreaSet,
     GetCleanInfoMower,
     MowerStateRefresh,
+    ObservedAreaParameterWrite,
+    ObservedCutDirectionWrite,
     SetAreaParameter,
     has_family,
 )
@@ -109,7 +113,7 @@ def _fail(what: str) -> NoReturn:
 
 
 def apply() -> None:
-    """Register our message handlers. Idempotent."""
+    """Register our message handlers and p2p commands. Idempotent."""
     if not isinstance(_DEVICES, dict):
         _fail("deebot_client.hardware._DEVICES is not a dict")
     if not isinstance(MESSAGES, dict):
@@ -157,6 +161,19 @@ def apply() -> None:
         MESSAGES[message.NAME] = message
         if MESSAGES.get(message.NAME) is not message:
             _fail(f"registration of {message.NAME} did not take")
+
+    # The p2p table the MQTT client looks a request from another client up in,
+    # mutated in place for the same reason as MESSAGES: mqtt_client imported
+    # the object, not the name. Both entries only report what the app wrote,
+    # for the diagnostic button; the cutting-direction one also does what the
+    # library's own entry did.
+    p2p = COMMANDS_WITH_MQTT_P2P_HANDLING.get(DataType.JSON)
+    if not isinstance(p2p, dict):
+        _fail("deebot_client.commands.COMMANDS_WITH_MQTT_P2P_HANDLING is not a dict")
+    for command in (ObservedAreaParameterWrite, ObservedCutDirectionWrite):
+        p2p[command.NAME] = command
+        if p2p.get(command.NAME) is not command:
+            _fail(f"p2p registration of {command.NAME} did not take")
 
     _LOGGER.debug("Message handlers registered")
 

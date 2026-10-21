@@ -19,7 +19,8 @@ The patch layer owns only the missing Ecovacs protocol pieces and their raw valu
 - `GetAreaParameter` parses `getAreaParameter` and stores `mowHeightLevel`, `cutMode`, `obstacleHeight`, and `angle` as raw values.
 - `OnAreaParameter` parses the mower's unsolicited `onAreaParameter` push through the same `apply_area_parameters` helper `GetAreaParameter` uses, registered in `deebot_patch/messages.py` and `apply()` the same way as this integration's other unsolicited-message handlers (`OnProtectState`, `OnRainDelay`, etc.).
 - `GetAreaSet` reassembles the mower's chunked `ar` response in a per-device fragment buffer, decodes it using the existing deebot-client decompressor, and extracts the area ID and name.
-- `SetAreaParameter` sends all four raw parameter fields for one `areaID`. It extends `ExecuteCommand`, so a reply with a non-zero `code` fails the command instead of passing for success.
+- `SetAreaParameter` sends all four raw parameter fields for one `areaID`. That is also what the app sends: captured on `e4gqia`, firmware 1.13.10, the app's request is `{"cutMode":7,"areaID":"2","obstacleHeight":1,"mowHeightLevel":6,"angle":227}`, one area with all four fields.
+- `ObservedAreaParameterWrite` and `ObservedCutDirectionWrite` pick up the `setAreaParameter` and `setCutDirection` requests another client (the app) sends, and publish them verbatim as `MowerWriteEvent` once the mower answers, for the **Log area parameters** button. `apply()` registers them in deebot-client's p2p command table; they change no state. It extends `ExecuteCommand`, so a reply with a non-zero `code` fails the command instead of passing for success.
 - The two read commands are registered together as the area refresh so the snapshot can be populated from both responses.
 
 These commands live in `deebot_patch/commands.py`, alongside the other patched protocol commands. `deebot_patch` does not translate the values into units or user-facing meanings.

@@ -630,3 +630,32 @@ def test_the_v2_trace_name_falls_back_to_our_handler() -> None:
     apply()
     assert "onMapTrace_V2" not in MESSAGES
     assert MESSAGES["onMapTrace"] is OnMapTrace
+
+
+def test_the_p2p_table_is_the_one_the_mqtt_client_reads() -> None:
+    # apply() mutates the table in place; a copy in mqtt_client would make the
+    # registrations invisible, and the app's writes would be dropped again.
+    from deebot_client import mqtt_client
+    from deebot_client.commands import COMMANDS_WITH_MQTT_P2P_HANDLING
+
+    assert mqtt_client.COMMANDS_WITH_MQTT_P2P_HANDLING is COMMANDS_WITH_MQTT_P2P_HANDLING
+
+
+def test_apply_registers_the_observed_writes() -> None:
+    from deebot_client.commands import COMMANDS_WITH_MQTT_P2P_HANDLING
+    from deebot_client.commands.json.cut_direction import SetCutDirection
+    from deebot_client.const import DataType
+
+    from custom_components.ecovacs_mower.deebot_patch import apply
+    from custom_components.ecovacs_mower.deebot_patch.commands import (
+        ObservedAreaParameterWrite,
+        ObservedCutDirectionWrite,
+    )
+
+    apply()
+    p2p = COMMANDS_WITH_MQTT_P2P_HANDLING[DataType.JSON]
+    assert p2p["setAreaParameter"] is ObservedAreaParameterWrite
+    # Replaces the library's entry, so it has to be one: the device-level
+    # cutting direction is fed by what the parent publishes.
+    assert p2p["setCutDirection"] is ObservedCutDirectionWrite
+    assert issubclass(ObservedCutDirectionWrite, SetCutDirection)

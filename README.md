@@ -412,7 +412,11 @@ setting in the Ecovacs app. The **Log area parameters** button collects that:
    change with its time, for example
    `18:07:06 Area 1 (Front lawn): mow_height_level 6 → 7`. A mower that
    reports changes on its own shows them within a second; for any other the
-   integration asks every 15 seconds, so wait that long between steps.
+   integration asks every 15 seconds, so wait that long between steps. At the
+   top, the notification also shows the first change the app writes for the
+   areas and for the mower-wide cutting direction, exactly as the app sent it,
+   for example `setAreaParameter {"cutMode":7,"areaID":"2",…}`: that is the
+   format the integration has to write on your model.
 4. Copy the notification into a new issue, together with your notes and your
    mower's model. The device class the integration needs is in the
    notification's title, in brackets.

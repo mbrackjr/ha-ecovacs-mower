@@ -16,8 +16,15 @@ looked at. So the areas are also asked for again every ``POLL_INTERVAL`` while
 the window is open. On a mower that pushes, a poll answer that repeats the
 last report is dropped by the bus and costs nothing more than the request.
 
+What the mower stores does not show what the app sent: whether a model's
+app writes an ``angle`` per area, say. So the first accepted write of each
+setting, ``setAreaParameter`` and ``setCutDirection``, normally from the app,
+is shown as it was sent, from the ``MowerWriteEvent`` the patch layer
+publishes.
+
 The record is a persistent notification, one per mower, rewritten on every
-change: the current raw values as a table and every change with its time.
+change: those writes, the current raw values as a table and every change with
+its time.
 Not log lines, because HA's log viewer groups warnings by the line of code
 that logged them, so a run of snapshot and change lines collapsed into one
 entry showing only the last. Each change is still logged at DEBUG, and the
@@ -40,7 +47,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .deebot_patch.areas import MowerArea, MowerAreaEvent
-from .deebot_patch.commands import GetAreaParameter, GetAreaSet
+from .deebot_patch.commands import GetAreaParameter, GetAreaSet, MowerWriteEvent
 from .deebot_patch.state_precedence import map_id_for
 
 _LOGGER = logging.getLogger(__name__)
@@ -83,10 +90,13 @@ class AreaParameterLog:
         self._label = f"{info.get('nick') or info['class']} ({info['class']})"
         self._notification_id = f"{DOMAIN}_area_parameters_{info['did']}"
         self._areas: dict[str, MowerArea] | None = None
+        self._writes: dict[str, MowerWriteEvent] = {}
         self._changes: list[str] = []
         self._notes: list[str] = []
+        self._started: datetime | None = None
         self._until: datetime | None = None
         self._unsub_event: CALLBACK_TYPE | None = None
+        self._unsub_writes: CALLBACK_TYPE | None = None
         self._unsub_timer: CALLBACK_TYPE | None = None
         self._unsub_poll: CALLBACK_TYPE | None = None
 
@@ -99,8 +109,10 @@ class AreaParameterLog:
         """
         self._async_stop()
         self._areas = None
+        self._writes = {}
         self._changes = []
         self._notes = []
+        self._started = dt_util.utcnow()
         self._until = dt_util.now() + LOG_WINDOW
         self._unsub_timer = async_call_later(self._hass, LOG_WINDOW, self._on_window_end)
         _LOGGER.warning(
@@ -109,6 +121,9 @@ class AreaParameterLog:
         self._publish()
         # Subscribed before asking, so the answer cannot arrive unheard.
         self._unsub_event = self._device.events.subscribe(MowerAreaEvent, self._on_areas)
+        self._unsub_writes = self._device.events.subscribe(
+            MowerWriteEvent, self._on_write
+        )
         self._unsub_poll = async_track_time_interval(
             self._hass, self._poll, POLL_INTERVAL
         )
@@ -142,10 +157,16 @@ class AreaParameterLog:
     @callback
     def _async_stop(self) -> None:
         """Stop following changes, silently; the notification stays."""
-        for unsub in (self._unsub_event, self._unsub_timer, self._unsub_poll):
+        for unsub in (
+            self._unsub_event,
+            self._unsub_writes,
+            self._unsub_timer,
+            self._unsub_poll,
+        ):
             if unsub is not None:
                 unsub()
-        self._unsub_event = self._unsub_timer = self._unsub_poll = None
+        self._unsub_event = self._unsub_writes = None
+        self._unsub_timer = self._unsub_poll = None
 
     @callback
     def _on_window_end(self, _now: datetime) -> None:
@@ -187,6 +208,20 @@ class AreaParameterLog:
                             )
         self._publish()
 
+    async def _on_write(self, event: MowerWriteEvent) -> None:
+        """Keep the first accepted write of each setting, or a refusal until then."""
+        # The bus hands a new subscriber its last event, which can be a write
+        # from before this press.
+        if self._started is None or event.at < self._started:
+            return
+        kept = self._writes.get(event.command)
+        if kept is None or (kept.code != 0 and event.code == 0):
+            self._writes[event.command] = event
+            _LOGGER.debug(
+                "%s %s: %s", _TAG, self._label, _write(event).replace("`", "")
+            )
+            self._publish()
+
     def _change(self, line: str) -> None:
         _LOGGER.debug("%s %s: %s", _TAG, self._label, line)
         self._changes.append(line)
@@ -215,6 +250,12 @@ class AreaParameterLog:
             else "Stopped. Press **Log area parameters** again to start over.",
             "",
         ]
+        if self._writes:
+            lines += [
+                "**Written to the mower** (the first accepted write of each)",
+                *(f"- {_write(event)}" for event in self._writes.values()),
+                "",
+            ]
         if self._areas is None:
             lines.append("Waiting for the mower to report its areas.")
         elif not self._areas:
@@ -248,6 +289,13 @@ def _name(area: MowerArea) -> str:
 
 def _values(area: MowerArea) -> str:
     return ", ".join(f"{field}={_raw(getattr(area, field))}" for field in _FIELDS)
+
+
+def _write(event: MowerWriteEvent) -> str:
+    time = dt_util.as_local(event.at).strftime("%H:%M:%S")
+    channel = f" ({event.channel})" if event.channel else ""
+    result = "accepted" if event.code == 0 else f"refused (code {event.code})"
+    return f"{time} `{event.command} {event.data}`{channel}: {result}"
 
 
 def _raw(value: int | None) -> str:
