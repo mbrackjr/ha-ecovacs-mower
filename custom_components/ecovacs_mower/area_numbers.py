@@ -232,7 +232,7 @@ _A1600_CUT_ANGLE = AreaParameterFormula(
     native_step=1,
 )
 
-# The O1200 LiDAR Pro's own readings (issue #131). Its height runs in half
+# The O1200 LiDAR Pro's own readings (issue #23). Its height runs in half
 # centimetres, from raw 1 = 8 cm down to raw 11 = 3 cm: raw 1 and 8-11 were
 # read, raw 2-7 follow the same steps. Its app offers only two speeds, so only
 # those two raw values exist here: raw 5 and 6, in between, are never written.
@@ -271,8 +271,11 @@ AREA_PARAMETER_MAPPINGS: dict[str, AreaParameterMapping] = {
     # every raw value, and writes from Home Assistant landed as the app shows
     # them (PR #137), so it shares the A1600's mapping rather than a copy.
     "51rcxt": _A1600_MAPPING,
-    # The O1200 LiDAR Pro's obstacle heights and directions matched the A1600's
-    # (issue #131); its heights and speeds did not, so those are its own.
+    # The O1200 LiDAR Pro's obstacle heights matched the A1600's (issue #23). Its
+    # app labels the direction left, straight and right, whose raw 270, 180 and
+    # 90 fall on the A1600 formula's 0, 90 and 180; the in-between raw values
+    # set in the app (141, 177) land inside 0-180 too. Its heights and speeds
+    # did not match, so those are its own.
     "2i0fns": AreaParameterMapping(
         mow_height=_O1200_MOW_HEIGHT,
         cut_speed=_O1200_CUT_SPEED,

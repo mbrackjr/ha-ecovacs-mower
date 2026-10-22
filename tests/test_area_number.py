@@ -585,7 +585,8 @@ def test_a_lookup_cannot_be_changed_after_validation() -> None:
     with pytest.raises(TypeError):
         lookup.values_by_raw[3] = 1  # type: ignore[index]
 
-# The O1200 LiDAR Pro's readings from issue #131, as the app showed them.
+
+# The O1200 LiDAR Pro's readings from issue #23, as the app showed them.
 @pytest.mark.parametrize(
     ("parameter", "raw", "native"),
     [

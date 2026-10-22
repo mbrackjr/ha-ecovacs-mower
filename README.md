@@ -105,7 +105,7 @@ merely that the class string was seen:
 
 | Model | Device class | Confirmed by |
 | --- | --- | --- |
-| **Ecovacs GOAT O1200 LiDAR Pro** | `2i0fns` | the author's own hardware |
+| **Ecovacs GOAT O1200 LiDAR Pro** | `2i0fns` | the author's own hardware; per-area parameters ([#23](https://github.com/nord-/ha-ecovacs-mower/issues/23)) |
 | **Ecovacs GOAT O800 RTK** | `9bts2s` | a user, firmware 1.13.8 ([#8](https://github.com/nord-/ha-ecovacs-mower/issues/8)) — zone mowing confirmed on that firmware |
 | **Ecovacs GOAT O800 RTK** | `2px96q` | a user, controls and state confirmed — start/pause in [#24](https://github.com/nord-/ha-ecovacs-mower/issues/24), state on firmware 1.17.11 in [#56](https://github.com/nord-/ha-ecovacs-mower/issues/56). Firmware 1.17 speaks a second map dialect, decoded from two users' logs but not yet confirmed on hardware ([#41](https://github.com/nord-/ha-ecovacs-mower/issues/41)) |
 | **Ecovacs GOAT G1-800** | `77atlz` | a user, firmware 1.36.208 — the protection-flag sensors in [#30](https://github.com/nord-/ha-ecovacs-mower/issues/30), start/pause/resume/dock from the `lawn_mower` entity in [#74](https://github.com/nord-/ha-ecovacs-mower/issues/74). That firmware branch answers the `V2` command family instead of the one every other confirmed mower uses, and the integration detects and switches to it automatically, so no manual configuration is needed ([#42](https://github.com/nord-/ha-ecovacs-mower/issues/42)); zone mowing is confirmed ([#114](https://github.com/nord-/ha-ecovacs-mower/pull/114)); border mowing is built for this class from the request captured in [#12](https://github.com/nord-/ha-ecovacs-mower/issues/12) and awaits confirmation on hardware |
@@ -357,7 +357,10 @@ model's app offers:
 | Cutting height | 3–9 cm | 3–8 cm, in steps of 0.5 cm |
 | Mowing speed | 0.40–0.70 m/s | 0.35 or 0.50 m/s |
 | Obstacle height | 10, 15 or 20 cm | 10, 15 or 20 cm |
-| Cutting direction | 0–180° | 0–180° |
+| Cutting direction | 0–180° | 0–180° (see below) |
+
+The O1200 LiDAR Pro's app shows no angle but left, straight and right, as seen
+from the mower leaving the dock: in Home Assistant these are 0°, 90° and 180°.
 
 The entities use the numeric `areaID` for their identity, not the area's name.
 The name shown by the mower is user-editable in the Ecovacs app, so changing
