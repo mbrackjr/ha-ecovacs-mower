@@ -48,7 +48,7 @@ Cutting a release is therefore three steps, and the bump is the one commit that 
 - `border.py` — `MowBorder`, the `border` task-start command (issue #12), built on the same `_AdaptiveFamily` machinery as `MowArea` and sharing `_TaskClean`, the `{"type", "value"}` payload builder in `commands.py`, with it. Needs the id of the map in use, which it does not fetch: it is handed one by `button.py`, which reads it from `state_precedence.map_id_for()`. Exposed as the `mow_border` button, alongside `end_task`, which is `CleanMower(CleanAction.STOP)` and needs nothing from this module (issue #51).
 - `families.py` — which of the V2/non-V2 command pair a given mower answers on, keyed by `did` and learned at runtime rather than from the class string (issue #42).
 - `state_precedence.py` — per-device record, keyed by `EventBus`, of the facts the handlers learn from the stream: that the mower is docked, which beats a paused plan, and what the suppressed state was (issue #67); the two halves of a departure from the dock, `departure_edge_at` and `charge_left_at`, which the bury-point and charge handlers pair within `DEPARTURE_WINDOW`, a reported state or a pause or stop edge cancels, and a dock clears the unplug half of (issue #120); and the id of the map the mower is using, written by `map_messages._MapMessage` from every map message's envelope and read by the border button (issue #12) and by `GetAreaSet`. A change of that id requests the area refresh, so the area names arrive once the first map message has named the map. `register()` is also the marker that says a bus belongs to a patched mower rather than a vacuum on the same account.
-- `authentication.py` — `AccountAuthenticator`, which renews the session from the `uid`/`accessToken` pair a login or a device verification returns instead of re-posting the password. Backport of the still-open DeebotUniverse/client.py#1743. It wraps two name-mangled privates of `_AuthClient` on the instance; the pair is persisted in `entry.data[CONF_CREDENTIALS]` by the config flow and read back by the controller. Without it, Ecovacs' `1013` answer to the password login sends the entry into an endless reauth loop (issue #21).
+- `authentication.py` — `AccountAuthenticator`, which renews the session from the `uid`/`accessToken` pair a login or a device verification returns instead of re-posting the password. Backport of DeebotUniverse/client.py#1743, released in `deebot-client` 18.7.0, onto the 18.6.0 the manifest still accepts. It wraps two name-mangled privates of `_AuthClient` on the instance; the pair is persisted in `entry.data[CONF_CREDENTIALS]` by the config flow and read back by the controller. Without it, Ecovacs' `1013` answer to the password login sends the entry into an endless reauth loop (issue #21).
 - `__init__.py` — `apply()` (registers the messages, idempotent) and `verify_capabilities()`.
 
 ### The order in `EcovacsController.initialize()` is a hard invariant
@@ -83,7 +83,21 @@ The per-area parameter entities in `area_numbers.py` are another exception: dyna
 - Comments explain *why*, especially where the code looks needlessly convoluted (exact type comparison instead of `isinstance`, in-place mutation instead of rebinding). Don't remove them to "clean up".
 - `strings.json` and `translations/en.json` must be **identical** — `test_translations.py` guards this, nothing syncs them automatically. Never create an `sv.json`; the HA frontend's language here is English.
 - Every translation key and `icons.json` key must belong to a real entity — the platform tests check both directions.
-- New hardware is supported by adding the device class to `SUPPORTED_CLASSES` as a `MowerProfile` with no flags. Unsupported MOWER classes log a warning with the class string; that's the string users are asked to report.
+- Unsupported MOWER classes log a warning with the class string; that's the string users are asked to report. New hardware is then supported by adding the device class to `SUPPORTED_CLASSES` as a `MowerProfile` with no flags, and only after the reporter has run that line locally and confirmed the controls and state work (the README's "Hardware support" section is what they follow; the maintainer's comment on issue #140 is the template for asking). A new-model issue without that confirmation is `needs-info`, not `ready-for-agent`. `o4kvvk`, `6n9pcz` and `0jbd6s` predate this and were added unconfirmed.
 - A model-specific capability is enabled per class only once it is validated on that class: set the matching profile flag (`area_parameters`, `area_names`, `zone_mowing`, `border_mowing`, `uwb_beacons`), and for the area parameters also add that model's own entry to `AREA_PARAMETER_MAPPINGS`. A field with the same name on another GOAT is not evidence that its values mean the same. `docs/area-parameter-capability.md` lists what to verify for the area parameters. A new per-class gate is a new `MowerProfile` flag defaulting to `False`, never a module-level tuple of classes.
 - Version is bumped in `manifest.json`, and that bump is what publishes a release once it lands on `master` (see above). The bump belongs in its own commit by the maintainer after the work has landed, never in a feature PR: `release.yml` tags whatever version it finds without checking that it is newer than the last tag, so two branches bumping in parallel publish releases out of order. `deebot-client` is pinned there and in `requirements-test.txt` — keep them in sync.
 - Conventional commits, no AI attribution.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `nord-/ha-ecovacs-mower` (the `origin` remote), accessed with `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default triage labels, each named after its role. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
