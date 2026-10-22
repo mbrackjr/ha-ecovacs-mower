@@ -174,11 +174,13 @@ class AreaParameterMapping:
 
 
 # The following three tables are the A1600 LiDAR Pro's validated HA
-# representations, which the A3000 LiDAR Pro shares through ``_A1600_MAPPING``:
-# a change made on new A1600 evidence changes both models, so it needs
-# evidence from both. Each pair is a raw value and its HA value, so each table
-# is the single source of truth for conversion in both directions and for the
-# HA number entity's min/max/step metadata.
+# representations. The A3000 LiDAR Pro shares all of them, and the angle
+# formula below, through ``_A1600_MAPPING``; the O1200 LiDAR Pro shares the
+# obstacle height and the angle formula. A change made on new A1600 evidence
+# therefore needs evidence from every model that shares what it changes. Each
+# pair is a raw value and its HA value, so each table is the single source of
+# truth for conversion in both directions and for the HA number entity's
+# min/max/step metadata.
 _A1600_MOW_HEIGHT = AreaParameterLookup(
     {1: 9, 2: 8, 3: 7, 4: 6, 5: 5, 6: 4, 7: 3},
 )
@@ -211,13 +213,15 @@ def _a1600_cut_angle(wire_angle: int) -> int | None:
 def _a1600_cut_angle_to_raw(value: float) -> int | None:
     """Convert an A1600 app-space cutting direction to wire-space angle.
 
-    Whole degrees from 0 to 180 only, as in the Ecovacs app on both models
-    that share this mapping: on the A3000 LiDAR Pro, too, every angle the app
-    sent lay within 0-180 (issue #131). A cutting direction is a line, not a
-    bearing, so 0-180 covers every stripe pattern; the device-wide
-    ``cut_direction`` in ``number.py`` has the same range. The A1600 accepts a
-    higher value written here, and the app then shows it, but the app never
-    sends one and what the mower does with it is untested.
+    Whole degrees from 0 to 180 only, as in the Ecovacs app on every model
+    that shares this formula: on the A3000 LiDAR Pro every angle the app sent
+    lay within 0-180 (issue #131), and on the O1200 LiDAR Pro the raw values of
+    its left, straight and right, and those set in between, all land inside it
+    (issue #23). A cutting direction is a line, not a bearing, so 0-180 covers
+    every stripe pattern; the device-wide ``cut_direction`` in ``number.py``
+    has the same range. The A1600 accepts a higher value written here, and the
+    app then shows it, but the app never sends one and what the mower does
+    with it is untested.
     """
     if value not in range(181):
         return None
