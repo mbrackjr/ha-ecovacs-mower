@@ -150,6 +150,14 @@ class MowerProfile:
 #                     area_numbers.py has all four. Height raw 2-7 are
 #                     inferred from the half-centimetre steps, not read, and
 #                     no write from Home Assistant has run on this class yet.
+#                     xmp9ds: the A1600 RTK's raw values, from the owner's
+#                     log with the app (issue #23, firmware 1.17.11): height
+#                     and obstacle height run as on the A1600 LiDAR Pro, its
+#                     two speeds do not, and its areas have no angle. The
+#                     app values of the per-area levels are taken from the
+#                     same settings read in Auto mode; height raw 2-5 are
+#                     inferred, and no write from Home Assistant has run on
+#                     this class yet.
 #   area_names      — 9bts2s: the ar response captured on a three-lawn O800
 #                     RTK, firmware 1.13.8 (issue #41), after renaming the
 #                     areas in the app:
@@ -211,7 +219,7 @@ SUPPORTED_CLASSES: dict[str, MowerProfile] = {
         "77atlz", zone_mowing=True, border_mowing=True, uwb_beacons=True
     ),
     "e4gqia": MowerProfile("e4gqia", area_parameters=True, zone_mowing=True),
-    "xmp9ds": MowerProfile("xmp9ds"),
+    "xmp9ds": MowerProfile("xmp9ds", area_parameters=True),
     "o4kvvk": MowerProfile("o4kvvk"),
     "6n9pcz": MowerProfile("6n9pcz"),
     "0jbd6s": MowerProfile("0jbd6s"),
