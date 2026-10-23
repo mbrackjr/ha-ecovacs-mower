@@ -1,0 +1,19 @@
+# Config for the scheduled agent run (no GitHub token: the environment's own
+# access is used, and PR states are passed in by the agent).
+upstream = "nord-/ha-ecovacs-mower"
+upstream_branch = "master"
+fork = "mbrackjr/ha-ecovacs-mower"
+
+committer_name = "Junior"
+committer_email = "3652810+mbrackjr@users.noreply.github.com"
+
+test_setup = "uv venv -q -p 3.14 /tmp/restack-venv && VIRTUAL_ENV=/tmp/restack-venv uv pip install -q -r requirements-test.txt"
+test_command = "/tmp/restack-venv/bin/python -m pytest tests/ -q -p no:cacheprovider"
+
+[[stack]]
+name = "area parameters"
+# #151 is carried as one commit and is deliberately not listed.
+branches = [
+  { branch = "refactor/area-parameter-value-mappings", pr = 157 },
+  { branch = "feat/a1600-rtk-area-parameters" },
+]
