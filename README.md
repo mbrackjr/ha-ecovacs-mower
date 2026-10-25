@@ -446,14 +446,29 @@ setting in the Ecovacs app. The **Log area parameters** button collects that:
    `18:07:06 Area 1 (Front lawn): mowHeightLevel 6 → 7`. A mower that reports
    changes on its own shows them within a second; for any other the integration
    asks every 15 seconds, so wait that long between steps.
-4. Copy the notification into a new issue, together with your notes and your
+4. If your app also has mowing settings for the whole mower — the **Auto**
+   mowing mode's speed, height and obstacle avoidance, the cutting direction,
+   the edge mode, the weekly change of direction — step through those in the
+   same way, and write down what you set. Not every model has them.
+5. Copy the notification into a new issue, together with your notes and your
    mower's model. The device class the integration needs is in the
    notification's title, in brackets.
 
-The button only reads; it never changes a setting on the mower. It works on
+The settings for the whole mower are not stored per area, so they are taken
+from the Ecovacs app itself: while the window is open, the integration listens
+to what the app writes and reads for them, and the mower's answers. They get
+a second table, **Whole-mower settings**, with each setting's current raw
+value, the command the app read it with, and the app's last write exactly as
+it was sent. Every change joins the list of changes, for example
+`12:07:08 Auto height (CutHeight): level 7 → 6`, and a write the mower refused
+is listed with its code. A setting only shows up once the app has read or
+written it, so open the app's settings screens while the window is open.
+
+The button only reads and listens; it never changes a setting on the mower,
+and never asks the mower for a setting for the whole mower itself. It works on
 every mower, the models without area entities included. A model that does not
 support area parameters says so in the notification. Pressing the button again
-starts over, with a fresh table and an empty list of changes.
+starts over, with fresh tables and an empty list of changes.
 
 ### Border mowing
 

@@ -12,10 +12,13 @@ import logging
 from typing import NoReturn
 
 from deebot_client.capabilities import Capabilities
+from deebot_client.commands import COMMANDS_WITH_MQTT_P2P_HANDLING
+from deebot_client.const import DataType
 from deebot_client.events import StateEvent
 from deebot_client.hardware import _DEVICES
 from deebot_client.messages.json import MESSAGES
 
+from .app_traffic import ObservingTable
 from .areas import MowerAreaEvent
 from .authentication import AccountAuthenticator
 from .commands import (
@@ -109,7 +112,7 @@ def _fail(what: str) -> NoReturn:
 
 
 def apply() -> None:
-    """Register our message handlers. Idempotent."""
+    """Register our message handlers and wrap the p2p table. Idempotent."""
     if not isinstance(_DEVICES, dict):
         _fail("deebot_client.hardware._DEVICES is not a dict")
     if not isinstance(MESSAGES, dict):
@@ -157,6 +160,20 @@ def apply() -> None:
         MESSAGES[message.NAME] = message
         if MESSAGES.get(message.NAME) is not message:
             _fail(f"registration of {message.NAME} did not take")
+
+    # The p2p table the MQTT client looks another client's request up in,
+    # changed in place for the same reason as MESSAGES: mqtt_client imported
+    # the outer object, not the name. Its JSON half is wrapped, not replaced:
+    # the ObservingTable holds the library's own entries and answers exactly
+    # as they do unless the diagnostic button is capturing (app_traffic.py).
+    p2p = COMMANDS_WITH_MQTT_P2P_HANDLING.get(DataType.JSON)
+    if not isinstance(p2p, dict):
+        _fail("deebot_client's p2p table has no JSON half")
+    if not isinstance(p2p, ObservingTable):
+        COMMANDS_WITH_MQTT_P2P_HANDLING[DataType.JSON] = ObservingTable(p2p)
+    wrapped = COMMANDS_WITH_MQTT_P2P_HANDLING.get(DataType.JSON)
+    if not isinstance(wrapped, ObservingTable):
+        _fail("wrapping the p2p table did not take")
 
     _LOGGER.debug("Message handlers registered")
 
