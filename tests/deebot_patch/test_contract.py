@@ -630,3 +630,14 @@ def test_the_v2_trace_name_falls_back_to_our_handler() -> None:
     apply()
     assert "onMapTrace_V2" not in MESSAGES
     assert MESSAGES["onMapTrace"] is OnMapTrace
+
+
+def test_the_mqtt_client_reads_the_p2p_table_the_patch_wraps() -> None:
+    # apply() replaces the JSON half of this table in place. That only reaches
+    # the MQTT client if it reads the same outer object, at lookup time.
+    from deebot_client import commands, mqtt_client
+    from deebot_client.const import DataType
+
+    table = commands.COMMANDS_WITH_MQTT_P2P_HANDLING
+    assert mqtt_client.COMMANDS_WITH_MQTT_P2P_HANDLING is table
+    assert isinstance(table[DataType.JSON], dict)

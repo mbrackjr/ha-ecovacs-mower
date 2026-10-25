@@ -14,6 +14,7 @@ import sys
 import pytest
 
 from custom_components.ecovacs_mower.deebot_patch import (
+    app_traffic,
     families,
     messages,
     state_precedence,
@@ -38,6 +39,7 @@ def _reset_deebot_patch_state() -> None:
     fixture for the whole suite removes the need for every test module that
     touches any of them to remember to reset it.
     """
+    app_traffic.reset()
     families.reset()
     state_precedence.reset()
     messages.reset_beacon_readings()

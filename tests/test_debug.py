@@ -347,3 +347,130 @@ async def test_removing_the_button_mid_window_says_it_stopped(hass) -> None:
     assert _shown(notify).startswith("Stopped.")
     assert notify.call_count == written
     assert [c.NAME for c in sent] == ["getAreaParameter"]
+
+
+def _traffic_event(command, request, response=None, code=0, at=None, channel="Android"):
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.ecovacs_mower.deebot_patch.app_traffic import (
+        MowerAppTrafficEvent,
+    )
+
+    return MowerAppTrafficEvent(
+        command, request, response, code, channel, at or dt_util.utcnow()
+    )
+
+
+async def test_whole_mower_settings_show_the_payload_and_every_change(hass) -> None:
+    # Whole-mower settings from issue #23 (A1600 RTK) and the A1600 LiDAR
+    # Pro's own reads: no area table shows them.
+    from custom_components.ecovacs_mower.debug import AreaParameterLog
+
+    device = _device()
+    execute, _ = _answering(device, _event(_FRONT))
+    log = AreaParameterLog(hass, device, execute)
+
+    with patch(_NOTIFY) as notify:
+        await log.async_start()
+        await _settle()
+        for event in (
+            # Read in one batch with a setting that is not a mowing setting.
+            _traffic_event(
+                "getInfo",
+                '["getBorderSwitch","getRainDelay","getAutoCutDirection"]',
+                '{"getBorderSwitch":{"data":{"enable":1,"mode":1},"code":0},'
+                '"getRainDelay":{"data":{"enable":1,"delay":180},"code":0},'
+                '"getAutoCutDirection":{"data":{"enable":0},"code":0}}',
+            ),
+            _traffic_event("setCutHeight", '{"level":7}'),
+            _traffic_event("setCutHeight", '{"level":6}'),
+            _traffic_event("setBorderSwitch", '{"enable":1,"mode":2}'),
+            _traffic_event("setCutEfficiency", '{"level":3}', code=30005),
+            _traffic_event(
+                "setAreaParameter",
+                '{"areaID":"1","cutMode":2,"obstacleHeight":1,"mowHeightLevel":6}',
+            ),
+            # Not the app's: Home Assistant's own requests carry no channel.
+            _traffic_event("getCutHeight", "{}", '{"level":1}', channel=None),
+            # Not a mowing setting.
+            _traffic_event("setVolume", '{"volume":6}'),
+        ):
+            device.events.notify(event)
+            await _settle()
+
+    message = _shown(notify)
+    assert "**Whole-mower settings**" in message
+    table = message.split("**Whole-mower settings**")[1].split("**Changes**")[0]
+    rows = [line for line in table.splitlines() if line.startswith("| ")][1:]
+    assert rows == [
+        '| Auto speed (CutEfficiency) | — | — | — |',
+        '| Auto height (CutHeight) | `{"level":6}` | — | `setCutHeight {"level":6}` |',
+        '| Weekly direction change (AutoCutDirection) | `{"enable":0}` '
+        '| `getAutoCutDirection` | — |',
+        '| Edge mode (BorderSwitch) | `{"enable":1,"mode":2}` | `getBorderSwitch` '
+        '| `setBorderSwitch {"enable":1,"mode":2}` |',
+        '| Per area (AreaParameter) | see the table above | — '
+        '| `setAreaParameter {"areaID":"1","cutMode":2,"obstacleHeight":1,"mowHeightLevel":6}` |',
+    ]
+    changes = message.split("**Changes**")[1]
+    assert "Auto height (CutHeight): level ? → 7" in changes
+    assert "Auto height (CutHeight): level 7 → 6" in changes
+    # Only what changed: enable stayed 1.
+    assert "Edge mode (BorderSwitch): mode 1 → 2" in changes
+    assert "Edge mode (BorderSwitch): enable" not in changes
+    assert (
+        'Auto speed (CutEfficiency): `setCutEfficiency {"level":3}` refused (code 30005)'
+        in changes
+    )
+    # The first read only fills the table.
+    assert "Weekly direction change" not in changes
+    assert "RainDelay" not in message and "setVolume" not in message
+    assert '{"level":1}' not in message
+    log.async_shutdown()
+
+
+async def test_app_traffic_from_before_the_press_is_not_listed(hass) -> None:
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.ecovacs_mower.debug import AreaParameterLog
+
+    device = _device()
+    # The bus hands a new subscriber its last event: this one predates the press.
+    device.events.notify(
+        _traffic_event(
+            "setCutHeight", '{"level":1}', at=dt_util.utcnow() - timedelta(hours=1)
+        )
+    )
+    await _settle()
+    execute, _ = _answering(device, _event(_FRONT))
+    log = AreaParameterLog(hass, device, execute)
+
+    with patch(_NOTIFY) as notify:
+        await log.async_start()
+        await _settle()
+
+    assert "Whole-mower settings" not in _shown(notify)
+    log.async_shutdown()
+
+
+async def test_app_traffic_is_captured_only_while_the_window_is_open(hass) -> None:
+    from custom_components.ecovacs_mower.deebot_patch import app_traffic
+    from custom_components.ecovacs_mower.debug import AreaParameterLog
+
+    device = _device()
+    execute, _ = _answering(device, _event(_FRONT))
+    log = AreaParameterLog(hass, device, execute)
+
+    with patch(_NOTIFY):
+        await log.async_start()
+        await _settle()
+        assert app_traffic._captures == 1
+        # A second press restarts the window without stacking captures.
+        await log.async_start()
+        await _settle()
+        assert app_traffic._captures == 1
+        log.async_shutdown()
+
+    assert app_traffic._captures == 0
