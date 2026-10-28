@@ -11,9 +11,10 @@ parameter or a model:
 - ``AREA_PARAMETERS`` says what each known parameter is in Home Assistant
   on every model: its name, unit, icon and entity key.
 - ``AREA_PARAMETER_VALUE_MAPPINGS`` has one self-contained entry per validated
-  mower class. It names the parameters that model has and the conversion of
-  each between raw values and Home Assistant values. A model without a
-  parameter leaves it out, and gets no entity for it.
+  mower class, a ``ModelValueMappings``. It names the parameters that model
+  has and the conversion of each between raw values and Home Assistant
+  values. A model without a parameter leaves it out, and gets no entity for
+  it.
 
 Model- and firmware-specific conversion from raw device values to
 human-sensible Home Assistant values lives exclusively in this HA layer. Each
@@ -240,6 +241,26 @@ AREA_PARAMETERS: tuple[AreaParameter, ...] = (
 )
 
 
+@dataclass(frozen=True, kw_only=True)
+class ModelValueMappings:
+    """The value mappings of one validated mower class.
+
+    ``areas`` maps the parameters the model has per saved area, by wire key,
+    to their conversion. A parameter the model does not have is left out, and
+    an empty ``areas`` gives the model no area entities.
+    """
+
+    # Excluded from the hash: a mapping is not hashable, and the frozen
+    # dataclass would otherwise generate a __hash__ that fails on first use.
+    areas: Mapping[str, AreaParameterValueMapping] = field(
+        default_factory=dict, hash=False
+    )
+
+    def __post_init__(self) -> None:
+        """Freeze the table: it is validated data, shared by every entity."""
+        object.__setattr__(self, "areas", MappingProxyType(dict(self.areas)))
+
+
 # One entry per validated mower class, complete in itself: the parameters
 # that model has, by wire key, and each one's conversion. Each entry is
 # written out in full, also where two models' values are the same, so a
@@ -253,67 +274,71 @@ AREA_PARAMETERS: tuple[AreaParameter, ...] = (
 # because its protocol fields have the same names. The generic entity code
 # below derives conversion and number limits from these entries; no
 # model-specific values belong anywhere else.
-AREA_PARAMETER_VALUE_MAPPINGS: dict[
-    str, Mapping[str, AreaParameterValueMapping]
-] = {
+AREA_PARAMETER_VALUE_MAPPINGS: dict[str, ModelValueMappings] = {
     # GOAT A1600 LiDAR Pro.
-    "e4gqia": {
-        # Cutting height, cm.
-        "mowHeightLevel": AreaParameterLookup(
-            {1: 9, 2: 8, 3: 7, 4: 6, 5: 5, 6: 4, 7: 3}
-        ),
-        # Mowing speed, m/s.
-        "cutMode": AreaParameterLookup(
-            {1: 0.70, 2: 0.65, 3: 0.60, 4: 0.55, 5: 0.50, 6: 0.45, 7: 0.40}
-        ),
-        # Obstacle height, cm.
-        "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
-        # Cutting direction. The mower accepts an app value above 180 written
-        # from Home Assistant, and the app then shows it, but the app never
-        # sends one and what the mower does with it is untested.
-        "angle": AreaParameterAngle(wire_at_zero=270, native_max_value=180),
-    },
+    "e4gqia": ModelValueMappings(
+        areas={
+            # Cutting height, cm.
+            "mowHeightLevel": AreaParameterLookup(
+                {1: 9, 2: 8, 3: 7, 4: 6, 5: 5, 6: 4, 7: 3}
+            ),
+            # Mowing speed, m/s.
+            "cutMode": AreaParameterLookup(
+                {1: 0.70, 2: 0.65, 3: 0.60, 4: 0.55, 5: 0.50, 6: 0.45, 7: 0.40}
+            ),
+            # Obstacle height, cm.
+            "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
+            # Cutting direction. The mower accepts an app value above 180 written
+            # from Home Assistant, and the app then shows it, but the app never
+            # sends one and what the mower does with it is untested.
+            "angle": AreaParameterAngle(wire_at_zero=270, native_max_value=180),
+        },
+    ),
     # GOAT A3000 LiDAR Pro. Its own readings (issue #131) matched the A1600's
     # at every raw value, and writes from Home Assistant landed as the app
     # shows them (PR #137).
-    "51rcxt": {
-        # Cutting height, cm.
-        "mowHeightLevel": AreaParameterLookup(
-            {1: 9, 2: 8, 3: 7, 4: 6, 5: 5, 6: 4, 7: 3}
-        ),
-        # Mowing speed, m/s.
-        "cutMode": AreaParameterLookup(
-            {1: 0.70, 2: 0.65, 3: 0.60, 4: 0.55, 5: 0.50, 6: 0.45, 7: 0.40}
-        ),
-        # Obstacle height, cm.
-        "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
-        # Cutting direction. Every angle the app sent lay within 0-180
-        # (issue #131).
-        "angle": AreaParameterAngle(wire_at_zero=270, native_max_value=180),
-    },
+    "51rcxt": ModelValueMappings(
+        areas={
+            # Cutting height, cm.
+            "mowHeightLevel": AreaParameterLookup(
+                {1: 9, 2: 8, 3: 7, 4: 6, 5: 5, 6: 4, 7: 3}
+            ),
+            # Mowing speed, m/s.
+            "cutMode": AreaParameterLookup(
+                {1: 0.70, 2: 0.65, 3: 0.60, 4: 0.55, 5: 0.50, 6: 0.45, 7: 0.40}
+            ),
+            # Obstacle height, cm.
+            "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
+            # Cutting direction. Every angle the app sent lay within 0-180
+            # (issue #131).
+            "angle": AreaParameterAngle(wire_at_zero=270, native_max_value=180),
+        },
+    ),
     # GOAT O1200 LiDAR Pro, read with the app (issue #23).
-    "2i0fns": {
-        # Cutting height, cm, in half centimetres from raw 1 = 8 cm down to
-        # raw 11 = 3 cm. Raw 1 and 7-11 were read, 5.5 cm = raw 6 was written
-        # from Home Assistant and confirmed (PR #151); raw 2-5 follow the
-        # steps.
-        "mowHeightLevel": AreaParameterLookup(
-            {
-                1: 8.0, 2: 7.5, 3: 7.0, 4: 6.5, 5: 6.0, 6: 5.5,
-                7: 5.0, 8: 4.5, 9: 4.0, 10: 3.5, 11: 3.0,
-            }
-        ),
-        # Mowing speed, m/s. The app offers only Fine (raw 7) and Efficient
-        # (raw 4); raw 5 and 6, in between, are never written.
-        "cutMode": AreaParameterLookup({4: 0.50, 7: 0.35}),
-        # Obstacle height, cm.
-        "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
-        # Cutting direction. The app labels it left, straight and right, as
-        # seen from the mower leaving the dock: raw 270, 180 and 90, so 0, 90
-        # and 180 here. The in-between raw values set in the app (141, 177)
-        # land inside 0-180 too.
-        "angle": AreaParameterAngle(wire_at_zero=270, native_max_value=180),
-    },
+    "2i0fns": ModelValueMappings(
+        areas={
+            # Cutting height, cm, in half centimetres from raw 1 = 8 cm down to
+            # raw 11 = 3 cm. Raw 1 and 7-11 were read, 5.5 cm = raw 6 was written
+            # from Home Assistant and confirmed (PR #151); raw 2-5 follow the
+            # steps.
+            "mowHeightLevel": AreaParameterLookup(
+                {
+                    1: 8.0, 2: 7.5, 3: 7.0, 4: 6.5, 5: 6.0, 6: 5.5,
+                    7: 5.0, 8: 4.5, 9: 4.0, 10: 3.5, 11: 3.0,
+                }
+            ),
+            # Mowing speed, m/s. The app offers only Fine (raw 7) and Efficient
+            # (raw 4); raw 5 and 6, in between, are never written.
+            "cutMode": AreaParameterLookup({4: 0.50, 7: 0.35}),
+            # Obstacle height, cm.
+            "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
+            # Cutting direction. The app labels it left, straight and right, as
+            # seen from the mower leaving the dock: raw 270, 180 and 90, so 0, 90
+            # and 180 here. The in-between raw values set in the app (141, 177)
+            # land inside 0-180 too.
+            "angle": AreaParameterAngle(wire_at_zero=270, native_max_value=180),
+        },
+    ),
     # GOAT A1600 RTK, read with the app (issue #23, firmware 1.17.11). Its
     # areas have no cutting direction: they report no angle, the app's own
     # setAreaParameter carries none, and the direction is set for the whole
@@ -325,16 +350,18 @@ AREA_PARAMETER_VALUE_MAPPINGS: dict[
     # settings read in Auto mode on this mower, whose levels run the same
     # way: height 9 cm = 1, 4 cm = 6, 3 cm = 7; Quick = 1, Delicate = 2;
     # 10, 15, 20 cm = 1, 2, 3.
-    "xmp9ds": {
-        # Cutting height, cm. Raw 2-5 follow the one-centimetre steps.
-        "mowHeightLevel": AreaParameterLookup(
-            {1: 9, 2: 8, 3: 7, 4: 6, 5: 5, 6: 4, 7: 3}
-        ),
-        # Mowing speed, m/s. The app offers two only: Quick and Delicate.
-        "cutMode": AreaParameterLookup({1: 0.70, 2: 0.40}),
-        # Obstacle height, cm.
-        "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
-    },
+    "xmp9ds": ModelValueMappings(
+        areas={
+            # Cutting height, cm. Raw 2-5 follow the one-centimetre steps.
+            "mowHeightLevel": AreaParameterLookup(
+                {1: 9, 2: 8, 3: 7, 4: 6, 5: 5, 6: 4, 7: 3}
+            ),
+            # Mowing speed, m/s. The app offers two only: Quick and Delicate.
+            "cutMode": AreaParameterLookup({1: 0.70, 2: 0.40}),
+            # Obstacle height, cm.
+            "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
+        },
+    ),
 }
 
 
@@ -602,11 +629,11 @@ async def async_setup_area_numbers(
         profile = profile_for_class(device.device_info["class"])
         if profile is None or not profile.area_parameters:
             continue
-        value_mappings = AREA_PARAMETER_VALUE_MAPPINGS.get(profile.device_class)
-        if value_mappings is None:
+        mappings = AREA_PARAMETER_VALUE_MAPPINGS.get(profile.device_class)
+        if mappings is None or not mappings.areas:
             continue
         _setup_device_area_numbers(
-            device, config_entry, async_add_entities, value_mappings
+            device, config_entry, async_add_entities, mappings.areas
         )
 
 
