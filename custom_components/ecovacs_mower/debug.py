@@ -16,6 +16,13 @@ looked at. So the areas are also asked for again every ``POLL_INTERVAL`` while
 the window is open. On a mower that pushes, a poll answer that repeats the
 last report is dropped by the bus and costs nothing more than the request.
 
+The same table has one more row, *Auto*: the settings some models keep for
+the whole mower, in the app's Auto mode, read with their own commands
+(``auto_parameters.py``). Every model is asked, because which of those reads
+a model answers is itself what an owner can report; an unanswered read stays
+``?``. The mower is not known to push these, so the app's writes to them are
+followed instead, and only the reads that were answered are polled.
+
 The record is a persistent notification, one per mower, rewritten on every
 change: the current raw values as a table and every change with its time.
 Not log lines, because HA's log viewer groups warnings by the line of code
@@ -26,6 +33,7 @@ start and the end at WARNING, all under ``[area parameters]``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
@@ -40,6 +48,11 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .deebot_patch.areas import AREA_PARAMETER_KEYS, MowerArea, MowerAreaEvent
+from .deebot_patch.auto_parameters import (
+    AUTO_READ_COMMANDS,
+    MowerAutoEvent,
+    auto_for,
+)
 from .deebot_patch.commands import GetAreaParameter, GetAreaSet
 from .deebot_patch.state_precedence import map_id_for
 
@@ -80,10 +93,15 @@ class AreaParameterLog:
         self._label = f"{info.get('nick') or info['class']} ({info['class']})"
         self._notification_id = f"{DOMAIN}_area_parameters_{info['did']}"
         self._areas: dict[str, MowerArea] | None = None
+        # The mower-wide settings, the "Auto" row: None until they have been
+        # asked for, then every value known, keyed by the area wire key.
+        self._auto: dict[str, int] | None = None
+        self._auto_reads: tuple[type[Command], ...] = ()
         self._changes: list[str] = []
         self._notes: list[str] = []
         self._until: datetime | None = None
         self._unsub_event: CALLBACK_TYPE | None = None
+        self._unsub_auto: CALLBACK_TYPE | None = None
         self._unsub_timer: CALLBACK_TYPE | None = None
         self._unsub_poll: CALLBACK_TYPE | None = None
 
@@ -96,6 +114,8 @@ class AreaParameterLog:
         """
         self._async_stop()
         self._areas = None
+        self._auto = None
+        self._auto_reads = ()
         self._changes = []
         self._notes = []
         self._until = dt_util.now() + LOG_WINDOW
@@ -106,6 +126,9 @@ class AreaParameterLog:
         self._publish()
         # Subscribed before asking, so the answer cannot arrive unheard.
         self._unsub_event = self._device.events.subscribe(MowerAreaEvent, self._on_areas)
+        self._unsub_auto = self._device.events.subscribe(
+            MowerAutoEvent, self._on_auto
+        )
         self._unsub_poll = async_track_time_interval(
             self._hass, self._poll, POLL_INTERVAL
         )
@@ -124,6 +147,44 @@ class AreaParameterLog:
             )
         else:
             await self._execute(GetAreaSet(map_id))
+        await self._ask_auto()
+
+    async def _ask_auto(self) -> None:
+        """Read the mower-wide settings once, and note which reads went unanswered.
+
+        Asked of every model: reading changes nothing, and which of the four
+        reads a model answers is part of what the log is for. The reads go out
+        together, so a model that answers none of them costs one round trip,
+        not four. Only the answered ones are polled afterwards.
+        """
+        commands = AUTO_READ_COMMANDS
+        answered = await asyncio.gather(*(self._execute(cmd()) for cmd in commands))
+        if self._until is None:
+            # The window closed, or the button went, while the reads were out.
+            return
+        self._auto_reads = tuple(
+            cmd for cmd, ok in zip(commands, answered, strict=True) if ok
+        )
+        # The table from here on starts at what the handlers have recorded,
+        # not at whatever the bus has delivered so far: its callbacks run as
+        # tasks, and one still on its way would otherwise show a value the
+        # first read set as a change.
+        self._auto = dict(auto_for(self._device.events).parameters)
+        missing = [cmd.NAME for cmd in commands if cmd not in self._auto_reads]
+        if len(missing) == len(commands):
+            self._note(
+                "The mower answered none of "
+                + ", ".join(missing)
+                + ". This model may have no mower-wide (Auto) settings."
+            )
+        elif missing:
+            self._note(
+                "The mower did not answer "
+                + ", ".join(missing)
+                + "; their Auto values stay ? unless the app changes them."
+            )
+        else:
+            self._publish()
 
     @callback
     def async_shutdown(self) -> None:
@@ -139,10 +200,16 @@ class AreaParameterLog:
     @callback
     def _async_stop(self) -> None:
         """Stop following changes, silently; the notification stays."""
-        for unsub in (self._unsub_event, self._unsub_timer, self._unsub_poll):
+        for unsub in (
+            self._unsub_event,
+            self._unsub_auto,
+            self._unsub_timer,
+            self._unsub_poll,
+        ):
             if unsub is not None:
                 unsub()
-        self._unsub_event = self._unsub_timer = self._unsub_poll = None
+        self._unsub_event = self._unsub_auto = None
+        self._unsub_timer = self._unsub_poll = None
 
     @callback
     def _on_window_end(self, _now: datetime) -> None:
@@ -162,6 +229,8 @@ class AreaParameterLog:
         # A failure here is not noted: the first answer already said whether
         # the mower answers at all, and one lost poll is made up by the next.
         await self._execute(GetAreaParameter())
+        for command in self._auto_reads:
+            await self._execute(command())
 
     async def _on_areas(self, event: MowerAreaEvent) -> None:
         """Take the first report as the table, record what changes after it."""
@@ -182,6 +251,24 @@ class AreaParameterLog:
                             self._change(
                                 f"{time} {_name(after)}: {key} {_raw(old)} → {_raw(new)}"
                             )
+        self._publish()
+
+    async def _on_auto(self, event: MowerAutoEvent) -> None:
+        """Record what changes in the mower-wide settings once they were read.
+
+        Only the keys the event carries are compared: a key missing from it
+        has not been reported yet, which is not a change. Before the first
+        read has finished the values are only taken in.
+        """
+        reported = event.area.parameters
+        if self._auto is None:
+            return
+        time = dt_util.now().strftime("%H:%M:%S")
+        for key in AREA_PARAMETER_KEYS:
+            if key in reported and self._auto.get(key) != reported[key]:
+                old = _raw(self._auto.get(key))
+                self._change(f"{time} Auto: {key} {old} → {reported[key]}")
+                self._auto[key] = reported[key]
         self._publish()
 
     def _change(self, line: str) -> None:
@@ -212,19 +299,33 @@ class AreaParameterLog:
             else "Stopped. Press **Log area parameters** again to start over.",
             "",
         ]
+        rows = []
         if self._areas is None:
             lines.append("Waiting for the mower to report its areas.")
         elif not self._areas:
             lines.append("The mower reported no areas.")
         else:
+            rows = [
+                (_name(self._areas[area_id]), self._areas[area_id].parameters)
+                for area_id in sorted(self._areas, key=_area_order)
+            ]
+        if self._auto is not None:
+            rows.append(("Auto", self._auto))
+        if rows:
             # Every known key, also one this model may not have: a column of
             # "?" is itself what an owner of an unmapped model can report.
             lines.append("| Area | " + " | ".join(AREA_PARAMETER_KEYS) + " |")
             lines.append("|---" * (len(AREA_PARAMETER_KEYS) + 1) + "|")
-            for area_id in sorted(self._areas, key=_area_order):
-                area = self._areas[area_id]
-                cells = (_raw(area.parameters.get(key)) for key in AREA_PARAMETER_KEYS)
-                lines.append(f"| {_name(area)} | " + " | ".join(cells) + " |")
+            for name, values in rows:
+                cells = (_raw(values.get(key)) for key in AREA_PARAMETER_KEYS)
+                lines.append(f"| {name} | " + " | ".join(cells) + " |")
+        if self._auto is not None:
+            lines += [
+                "",
+                "_Auto is the mower-wide setting, read with "
+                + ", ".join(cmd.NAME for cmd in AUTO_READ_COMMANDS)
+                + "; a change made in the app is followed._",
+            ]
         if self._changes:
             lines += ["", "**Changes**", *(f"- {line}" for line in self._changes)]
         if self._notes:
