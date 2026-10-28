@@ -10,13 +10,6 @@ belongs exclusively to the HA layer and must not be generalized here without
 validation. Which keys a model has is the HA layer's business too: this layer
 stores every key in ``AREA_PARAMETER_KEYS`` the mower reports, and only those.
 
-The mower-wide (Auto mode) settings some models keep are held here too, as
-one more area, ``auto``: the same four parameters, keyed by the same wire
-keys, each read and written with its own command (``commands.py``). They are
-published as their own ``MowerAutoEvent``, not inside ``MowerAreaEvent``:
-that event's areas are the mower's saved areas, which zone mowing and area
-discovery take as they come, and ``auto`` is not one.
-
 The area name is a separate response from ``getAreaSet``. Its ``ar`` response
 contains chunked Base64/LZMA data whose decoded rows start with map ID, area ID
 and the user-editable name. The decompressor is supplied by deebot-client; the
@@ -195,50 +188,6 @@ def apply_area_parameters(event_bus: EventBus, parameters: Any) -> bool:
     return True
 
 
-# The id the mower-wide (Auto mode) settings are kept and shown under. Not
-# numeric, so it can never be one of the mower's own area ids.
-AUTO_AREA_ID = "auto"
-
-
-@dataclass(frozen=True)
-class MowerAutoEvent(Event):
-    """The latest raw mower-wide settings known for the mower.
-
-    ``area`` has the id ``AUTO_AREA_ID`` and no name; its ``parameters`` hold
-    each setting the mower has reported, keyed by the area wire key.
-    """
-
-    area: MowerArea
-
-
-_AUTO_STATE: WeakKeyDictionary[EventBus, MowerArea] = WeakKeyDictionary()
-
-
-def auto_for(event_bus: EventBus) -> MowerArea:
-    """Return the mower-wide settings known for one mower, possibly none yet."""
-    return _AUTO_STATE.get(event_bus, MowerArea(AUTO_AREA_ID))
-
-
-def apply_auto_parameter(event_bus: EventBus, key: str, value: Any) -> bool:
-    """Record one mower-wide setting the mower reported, and publish them all.
-
-    The one place the mower-wide snapshot is written: for a read's answer and
-    for a write the app or Home Assistant made alike, both of which reach the
-    read's handler. Merged per key, like an area's parameters: one setting's
-    answer must not drop what the others reported. Returns whether ``value``
-    was usable.
-    """
-    if isinstance(value, bool) or not isinstance(value, int):
-        _LOGGER.debug("Unexpected value for mower-wide %s: %r", key, value)
-        return False
-    current = auto_for(event_bus)
-    _AUTO_STATE[event_bus] = replace(
-        current, parameters={**current.parameters, key: value}
-    )
-    event_bus.notify(MowerAutoEvent(_AUTO_STATE[event_bus]))
-    return True
-
-
 class _AreaSetFragmentBuffer:
     """Reassemble multipart area-set data using deebot-client's decoder."""
 
@@ -295,23 +244,18 @@ def fragments_for(event_bus: EventBus) -> _AreaSetFragmentBuffer:
 
 
 def reset() -> None:
-    """Forget all per-device area state, the mower-wide included. Tests only."""
+    """Forget all per-device area state. Tests only."""
     _AREA_STATE.clear()
     _PARAMETER_ANSWERS.clear()
-    _AUTO_STATE.clear()
     _FRAGMENTS.clear()
 
 
 __all__ = [
     "AREA_PARAMETER_KEYS",
-    "AUTO_AREA_ID",
     "MowerArea",
     "MowerAreaEvent",
-    "MowerAutoEvent",
     "apply_area_parameters",
-    "apply_auto_parameter",
     "area_for",
-    "auto_for",
     "fragments_for",
     "parameter_answers",
     "reset",

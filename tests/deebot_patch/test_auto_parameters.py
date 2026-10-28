@@ -1,4 +1,4 @@
-"""The mower-wide settings, read as the ``auto`` area.
+"""The mower-wide (Auto mode) settings: their commands and events.
 
 The followed app writes are driven through the library's own
 ``MqttClient._handle_p2p``, so what is tested is what the MQTT client really
@@ -11,6 +11,7 @@ from unittest.mock import Mock
 
 from deebot_client.commands import COMMANDS_WITH_MQTT_P2P_HANDLING
 from deebot_client.commands.json.border_switch import SetBorderSwitch
+from deebot_client.commands.json.cut_direction import GetCutDirection, SetCutDirection
 from deebot_client.const import DataType
 from deebot_client.events import CutDirectionEvent
 from deebot_client.message import HandlingState
@@ -18,22 +19,18 @@ from deebot_client.mqtt_client import MqttClient
 import pytest
 
 from custom_components.ecovacs_mower.deebot_patch import apply
-from custom_components.ecovacs_mower.deebot_patch.areas import (
-    AREA_PARAMETER_KEYS,
-    AUTO_AREA_ID,
-    MowerAutoEvent,
-    auto_for,
-)
+from custom_components.ecovacs_mower.deebot_patch.areas import AREA_PARAMETER_KEYS
 from custom_components.ecovacs_mower.deebot_patch.commands import (
-    AUTO_READ_COMMANDS,
+    AUTO_PARAMETERS,
     AUTO_WRITE_COMMANDS,
+    CutEfficiencyEvent,
+    CutHeightEvent,
     GetCutEfficiency,
     GetCutHeight,
-    GetMowerCutDirection,
     GetObstacleHeight,
+    ObstacleHeightEvent,
     SetCutEfficiency,
     SetCutHeight,
-    SetMowerCutDirection,
     SetObstacleHeight,
 )
 
@@ -68,86 +65,58 @@ def _exchange(client, command: str, request: bytes, answer: bytes) -> None:
     MqttClient._handle_p2p(client, topic, answer)
 
 
-def _auto_events(events: Mock) -> list[MowerAutoEvent]:
-    return [
-        call.args[0]
-        for call in events.notify.call_args_list
-        if isinstance(call.args[0], MowerAutoEvent)
-    ]
+def _published(events: Mock) -> list:
+    return [call.args[0] for call in events.notify.call_args_list]
 
 
-def test_the_commands_cover_the_area_keys_in_order() -> None:
-    assert [cmd.NAME for cmd in AUTO_READ_COMMANDS] == [
-        "getCutHeight",
-        "getCutEfficiency",
-        "getObstacleHeight",
-        "getCutDirection",
+def test_the_parameters_follow_the_area_keys_with_their_commands() -> None:
+    assert [
+        (p.key, p.read.NAME, p.write.NAME, p.event, p.field) for p in AUTO_PARAMETERS
+    ] == [
+        ("mowHeightLevel", "getCutHeight", "setCutHeight", CutHeightEvent, "level"),
+        ("cutMode", "getCutEfficiency", "setCutEfficiency", CutEfficiencyEvent, "level"),
+        (
+            "obstacleHeight",
+            "getObstacleHeight",
+            "setObstacleHeight",
+            ObstacleHeightEvent,
+            "level",
+        ),
+        ("angle", "getCutDirection", "setCutDirection", CutDirectionEvent, "angle"),
     ]
-    assert [cmd.NAME for cmd in AUTO_WRITE_COMMANDS] == [
-        "setCutHeight",
-        "setCutEfficiency",
-        "setObstacleHeight",
-        "setCutDirection",
+    assert tuple(p.key for p in AUTO_PARAMETERS) == AREA_PARAMETER_KEYS
+    assert [p.write.get_command for p in AUTO_PARAMETERS] == [
+        p.read for p in AUTO_PARAMETERS
     ]
-    assert [cmd.get_command for cmd in AUTO_WRITE_COMMANDS] == list(
-        AUTO_READ_COMMANDS
-    )
-    assert [cmd.PARAMETER_KEY for cmd in AUTO_READ_COMMANDS[:3]] == list(
-        AREA_PARAMETER_KEYS[:3]
-    )
+    assert AUTO_WRITE_COMMANDS == tuple(p.write for p in AUTO_PARAMETERS)
 
 
 @pytest.mark.parametrize(
-    ("command", "data", "key", "value"),
+    ("command", "data", "event"),
     [
-        (GetCutHeight, {"level": 6}, "mowHeightLevel", 6),
-        (GetCutEfficiency, {"level": 2}, "cutMode", 2),
-        (GetObstacleHeight, {"level": 3}, "obstacleHeight", 3),
-        (GetMowerCutDirection, {"angle": 179}, "angle", 179),
+        (GetCutHeight, {"level": 6}, CutHeightEvent(6)),
+        (GetCutEfficiency, {"level": 2}, CutEfficiencyEvent(2)),
+        (GetObstacleHeight, {"level": 3}, ObstacleHeightEvent(3)),
+        (GetCutDirection, {"angle": 179}, CutDirectionEvent(179)),
     ],
 )
-def test_an_answer_is_kept_under_the_area_key(command, data, key, value) -> None:
+def test_an_answer_publishes_its_own_event(command, data, event) -> None:
     events = Mock()
 
     result = command.handle_set_args(events, data)
 
     assert result.state is HandlingState.SUCCESS
-    assert auto_for(events).area_id == AUTO_AREA_ID
-    assert dict(auto_for(events).parameters) == {key: value}
-    [event] = _auto_events(events)
-    assert event.area == auto_for(events)
-
-
-def test_answers_are_merged_per_key() -> None:
-    events = Mock()
-
-    GetCutHeight.handle_set_args(events, {"level": 6})
-    GetCutEfficiency.handle_set_args(events, {"level": 1})
-    GetCutHeight.handle_set_args(events, {"level": 5})
-
-    assert dict(auto_for(events).parameters) == {"mowHeightLevel": 5, "cutMode": 1}
+    assert _published(events) == [event]
 
 
 @pytest.mark.parametrize("data", [{}, {"level": "6"}, {"level": True}, {"lvl": 6}])
-def test_an_unusable_answer_is_not_kept(data) -> None:
+def test_an_unusable_answer_publishes_nothing(data) -> None:
     events = Mock()
 
     result = GetCutHeight.handle_set_args(events, data)
 
     assert result.state is HandlingState.ANALYSE
-    assert dict(auto_for(events).parameters) == {}
     events.notify.assert_not_called()
-
-
-def test_the_cut_direction_answer_still_feeds_the_librarys_event() -> None:
-    # The device-wide cutting direction number reads CutDirectionEvent.
-    events = Mock()
-
-    GetMowerCutDirection.handle_set_args(events, {"angle": 270})
-
-    published = [call.args[0] for call in events.notify.call_args_list]
-    assert CutDirectionEvent(angle=270) in published
-    assert dict(auto_for(events).parameters) == {"angle": 270}
 
 
 def test_apply_registers_the_writes_and_keeps_the_librarys_entries() -> None:
@@ -158,26 +127,26 @@ def test_apply_registers_the_writes_and_keeps_the_librarys_entries() -> None:
     assert table["setCutHeight"] is SetCutHeight
     assert table["setCutEfficiency"] is SetCutEfficiency
     assert table["setObstacleHeight"] is SetObstacleHeight
-    assert table["setCutDirection"] is SetMowerCutDirection
+    assert table["setCutDirection"] is SetCutDirection
     assert table["setBorderSwitch"] is SetBorderSwitch
 
 
 @pytest.mark.parametrize(
-    ("command", "data", "key", "value"),
+    ("command", "data", "event"),
     [
-        ("setCutHeight", '{"level":7}', "mowHeightLevel", 7),
-        ("setCutEfficiency", '{"level":2}', "cutMode", 2),
-        ("setObstacleHeight", '{"level":3}', "obstacleHeight", 3),
-        ("setCutDirection", '{"angle":90}', "angle", 90),
+        ("setCutHeight", '{"level":7}', CutHeightEvent(7)),
+        ("setCutEfficiency", '{"level":2}', CutEfficiencyEvent(2)),
+        ("setObstacleHeight", '{"level":3}', ObstacleHeightEvent(3)),
+        ("setCutDirection", '{"angle":90}', CutDirectionEvent(90)),
     ],
 )
-def test_an_accepted_app_write_is_followed(command, data, key, value) -> None:
+def test_an_accepted_app_write_is_followed(command, data, event) -> None:
     apply()
     events = Mock()
 
     _exchange(_client(events), command, _set(data), _OK)
 
-    assert dict(auto_for(events).parameters) == {key: value}
+    assert event in _published(events)
 
 
 def test_a_refused_app_write_is_not_followed() -> None:
@@ -186,4 +155,4 @@ def test_a_refused_app_write_is_not_followed() -> None:
 
     _exchange(_client(events), "setCutHeight", _set('{"level":7}'), _REFUSED)
 
-    assert dict(auto_for(events).parameters) == {}
+    assert not any(isinstance(e, CutHeightEvent) for e in _published(events))

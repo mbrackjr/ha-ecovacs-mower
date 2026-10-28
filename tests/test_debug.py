@@ -480,10 +480,10 @@ async def test_a_mower_wide_change_is_listed(hass) -> None:
         await _settle()
 
     message = _shown(notify)
+    # A setting's first value is shown, not listed: only a difference is.
     assert "| Auto | 5 | 2 | ? | ? |" in message
     changes = [line for line in message.splitlines() if line.startswith("- ")]
     assert [line.split(" ", 2)[2] for line in changes] == [
         "Auto: mowHeightLevel 6 → 5",
-        "Auto: cutMode ? → 2",
     ]
     log.async_shutdown()

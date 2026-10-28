@@ -63,7 +63,7 @@ from __future__ import annotations
 from abc import ABC
 import asyncio
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import logging
 from datetime import time
 from types import MappingProxyType
@@ -85,16 +85,15 @@ from deebot_client.commands.json.common import (
 )
 from deebot_client.commands.json.custom import CustomCommand
 from deebot_client.commands.json.cut_direction import (
-    GetCutDirection as _LibraryGetCutDirection,
-)
-from deebot_client.commands.json.cut_direction import (
-    SetCutDirection as _LibrarySetCutDirection,
+    GetCutDirection,
+    SetCutDirection,
 )
 from deebot_client.commands.json.life_span import GetLifeSpan
 from deebot_client.commands.json.pos import GetPos
 from deebot_client.commands.json.stats import GetStats
 from deebot_client.const import DataType
-from deebot_client.events import LifeSpan, StateEvent
+from deebot_client.events import CutDirectionEvent, LifeSpan, StateEvent
+from deebot_client.events.base import Event
 from deebot_client.message import HandlingResult, HandlingState
 from deebot_client.models import CleanAction, CleanMode, State
 import orjson
@@ -105,7 +104,6 @@ from .areas import (
     _areas_for,
     _notify,
     apply_area_parameters,
-    apply_auto_parameter,
     fragments_for,
 )
 from .families import Family, commit, note_attempt, selected
@@ -1226,25 +1224,52 @@ class SetAreaParameter(ExecuteCommand):
 # The write commands are the A1600 RTK app's, captured in issue #23, where
 # the Auto levels used the same raw scales as that model's per-area values.
 # The read commands are named after them and after the library's own
-# getCutDirection. The mower is not known to push changes to these settings,
-# so ``apply()`` registers the write commands in the library's p2p table: the
-# library then hands a write another client made, once the mower accepted
-# it, to the matching read command, whose handler records the value through
-# ``apply_auto_parameter``.
+# getCutDirection, whose pair is used as it is.
+#
+# Each setting is written on its own, so nothing has to be kept to write
+# one: each read publishes its own event, as the library does for its
+# settings, and nothing else is stored. The mower is not known to push
+# changes to these settings, so ``apply()`` registers the write commands in
+# the library's p2p table: the library then hands a write another client
+# made, once the mower accepted it, to the matching read's handler, which
+# publishes it like an answer.
+
+
+@dataclass(frozen=True)
+class CutHeightEvent(Event):
+    """The mower-wide cutting height level, raw."""
+
+    level: int
+
+
+@dataclass(frozen=True)
+class CutEfficiencyEvent(Event):
+    """The mower-wide mowing speed level, raw."""
+
+    level: int
+
+
+@dataclass(frozen=True)
+class ObstacleHeightEvent(Event):
+    """The mower-wide obstacle height level, raw."""
+
+    level: int
 
 
 class _GetLevel(JsonGetCommand, ABC):
     """Read one mower-wide level setting, answered as ``{"level": n}``."""
 
-    # The area wire key the level is kept under.
-    PARAMETER_KEY: str
+    EVENT_TYPE: type[CutHeightEvent | CutEfficiencyEvent | ObstacleHeightEvent]
 
     @classmethod
     def _handle_body_data_dict(
         cls, event_bus: EventBus, data: dict[str, Any]
     ) -> HandlingResult:
-        if not apply_auto_parameter(event_bus, cls.PARAMETER_KEY, data.get("level")):
+        level = data.get("level")
+        if isinstance(level, bool) or not isinstance(level, int):
+            _LOGGER.debug("Unexpected %s answer: %r", cls.NAME, data)
             return HandlingResult.analyse()
+        event_bus.notify(cls.EVENT_TYPE(level))
         return HandlingResult.success()
 
 
@@ -1252,37 +1277,21 @@ class GetCutHeight(_GetLevel):
     """Read the mower-wide cutting height level."""
 
     NAME = "getCutHeight"
-    PARAMETER_KEY = "mowHeightLevel"
+    EVENT_TYPE = CutHeightEvent
 
 
 class GetCutEfficiency(_GetLevel):
     """Read the mower-wide mowing speed level."""
 
     NAME = "getCutEfficiency"
-    PARAMETER_KEY = "cutMode"
+    EVENT_TYPE = CutEfficiencyEvent
 
 
 class GetObstacleHeight(_GetLevel):
     """Read the mower-wide obstacle height level."""
 
     NAME = "getObstacleHeight"
-    PARAMETER_KEY = "obstacleHeight"
-
-
-class GetMowerCutDirection(_LibraryGetCutDirection):
-    """The library's ``getCutDirection``, also kept as the ``auto`` angle.
-
-    A subclass, so the library's ``CutDirectionEvent``, which the device-wide
-    cutting direction number reads, is still published as before.
-    """
-
-    @classmethod
-    def _handle_body_data_dict(
-        cls, event_bus: EventBus, data: dict[str, Any]
-    ) -> HandlingResult:
-        if not apply_auto_parameter(event_bus, "angle", data.get("angle")):
-            return HandlingResult.analyse()
-        return super()._handle_body_data_dict(event_bus, data)
+    EVENT_TYPE = ObstacleHeightEvent
 
 
 class _SetLevel(JsonSetCommand, ABC):
@@ -1315,27 +1324,45 @@ class SetObstacleHeight(_SetLevel):
     get_command = GetObstacleHeight
 
 
-class SetMowerCutDirection(_LibrarySetCutDirection):
-    """The library's ``setCutDirection``, recorded through ``GetMowerCutDirection``."""
+@dataclass(frozen=True)
+class AutoParameter:
+    """One mower-wide setting: its area wire key, commands and event.
 
-    get_command = GetMowerCutDirection
+    ``field`` is the name of the raw value, both in the commands' payload and
+    on the event.
+    """
+
+    key: str
+    read: type[JsonGetCommand]
+    write: type[JsonSetCommand]
+    event: type[Event]
+    field: str
 
 
-# Read commands, in AREA_PARAMETER_KEYS order.
-AUTO_READ_COMMANDS: tuple[type[JsonGetCommand], ...] = (
-    GetCutHeight,
-    GetCutEfficiency,
-    GetObstacleHeight,
-    GetMowerCutDirection,
+# In AREA_PARAMETER_KEYS order.
+AUTO_PARAMETERS: tuple[AutoParameter, ...] = (
+    AutoParameter(
+        "mowHeightLevel", GetCutHeight, SetCutHeight, CutHeightEvent, "level"
+    ),
+    AutoParameter(
+        "cutMode", GetCutEfficiency, SetCutEfficiency, CutEfficiencyEvent, "level"
+    ),
+    AutoParameter(
+        "obstacleHeight",
+        GetObstacleHeight,
+        SetObstacleHeight,
+        ObstacleHeightEvent,
+        "level",
+    ),
+    AutoParameter(
+        "angle", GetCutDirection, SetCutDirection, CutDirectionEvent, "angle"
+    ),
 )
 
-# Write commands, in the same order; another client's requests are followed
-# for them, registered in the library's p2p table by ``apply()``.
-AUTO_WRITE_COMMANDS: tuple[type[JsonSetCommand], ...] = (
-    SetCutHeight,
-    SetCutEfficiency,
-    SetObstacleHeight,
-    SetMowerCutDirection,
+# The write commands another client's requests are followed for, registered
+# in the library's p2p table by ``apply()``.
+AUTO_WRITE_COMMANDS: tuple[type[JsonSetCommand], ...] = tuple(
+    parameter.write for parameter in AUTO_PARAMETERS
 )
 
 
