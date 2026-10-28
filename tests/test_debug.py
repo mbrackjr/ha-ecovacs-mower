@@ -459,7 +459,7 @@ async def test_a_mower_without_mower_wide_settings_says_so(hass) -> None:
 
 async def test_a_mower_wide_change_is_listed(hass) -> None:
     from custom_components.ecovacs_mower.debug import AreaParameterLog
-    from custom_components.ecovacs_mower.deebot_patch.auto_parameters import (
+    from custom_components.ecovacs_mower.deebot_patch.commands import (
         GetCutEfficiency,
         GetCutHeight,
     )

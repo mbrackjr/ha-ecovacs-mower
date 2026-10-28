@@ -18,21 +18,23 @@ from deebot_client.mqtt_client import MqttClient
 import pytest
 
 from custom_components.ecovacs_mower.deebot_patch import apply
-from custom_components.ecovacs_mower.deebot_patch.areas import AREA_PARAMETER_KEYS
-from custom_components.ecovacs_mower.deebot_patch.auto_parameters import (
+from custom_components.ecovacs_mower.deebot_patch.areas import (
+    AREA_PARAMETER_KEYS,
     AUTO_AREA_ID,
+    MowerAutoEvent,
+    auto_for,
+)
+from custom_components.ecovacs_mower.deebot_patch.commands import (
     AUTO_READ_COMMANDS,
     AUTO_WRITE_COMMANDS,
     GetCutEfficiency,
     GetCutHeight,
     GetMowerCutDirection,
     GetObstacleHeight,
-    MowerAutoEvent,
     SetCutEfficiency,
     SetCutHeight,
     SetMowerCutDirection,
     SetObstacleHeight,
-    auto_for,
 )
 
 _APP = "HelperMQClientId-sts-ngiot-mqserver-eco1-34/ecosys/1234"

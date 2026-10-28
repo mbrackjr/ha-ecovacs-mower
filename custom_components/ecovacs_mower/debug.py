@@ -18,7 +18,7 @@ last report is dropped by the bus and costs nothing more than the request.
 
 The same table has one more row, *Auto*: the settings some models keep for
 the whole mower, in the app's Auto mode, read with their own commands
-(``auto_parameters.py``). Every model is asked, because which of those reads
+(``deebot_patch/commands.py``). Every model is asked, because which of those reads
 a model answers is itself what an owner can report; an unanswered read stays
 ``?``. The mower is not known to push these, so the app's writes to them are
 followed instead, and only the reads that were answered are polled.
@@ -47,13 +47,14 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .deebot_patch.areas import AREA_PARAMETER_KEYS, MowerArea, MowerAreaEvent
-from .deebot_patch.auto_parameters import (
-    AUTO_READ_COMMANDS,
+from .deebot_patch.areas import (
+    AREA_PARAMETER_KEYS,
+    MowerArea,
+    MowerAreaEvent,
     MowerAutoEvent,
     auto_for,
 )
-from .deebot_patch.commands import GetAreaParameter, GetAreaSet
+from .deebot_patch.commands import AUTO_READ_COMMANDS, GetAreaParameter, GetAreaSet
 from .deebot_patch.state_precedence import map_id_for
 
 _LOGGER = logging.getLogger(__name__)

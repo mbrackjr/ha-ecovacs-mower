@@ -646,12 +646,12 @@ def test_the_library_does_not_follow_the_mower_wide_writes_itself() -> None:
     """Documents why apply() registers them: none is in the library's table.
 
     Once one is, its registration here overrides the library's; check then
-    whether the library's command records what auto_parameters needs.
+    whether the library's command records what the mower-wide settings need.
     """
     from deebot_client.commands import COMMANDS_WITH_MQTT_P2P_HANDLING
     from deebot_client.const import DataType
 
-    from custom_components.ecovacs_mower.deebot_patch.auto_parameters import (
+    from custom_components.ecovacs_mower.deebot_patch.commands import (
         AUTO_WRITE_COMMANDS,
     )
 
@@ -662,7 +662,7 @@ def test_the_library_does_not_follow_the_mower_wide_writes_itself() -> None:
 
 
 def test_a_followed_set_hands_its_arguments_to_its_read() -> None:
-    """auto_parameters records a followed app write through the read's handler."""
+    """A followed app write is recorded through the read's handler."""
     import inspect
 
     from deebot_client.command import SetCommand

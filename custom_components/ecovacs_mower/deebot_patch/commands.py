@@ -66,9 +66,10 @@ from collections.abc import Mapping
 from dataclasses import replace
 import logging
 from datetime import time
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from deebot_client.command import Command
+from deebot_client.command import Command, InitParam
 from deebot_client.commands.json.charge_state import GetChargeState
 from deebot_client.commands.json.clean import (
     Clean,
@@ -79,8 +80,16 @@ from deebot_client.commands.json.clean import (
 from deebot_client.commands.json.common import (
     ExecuteCommand,
     JsonCommandWithMessageHandling,
+    JsonGetCommand,
+    JsonSetCommand,
 )
 from deebot_client.commands.json.custom import CustomCommand
+from deebot_client.commands.json.cut_direction import (
+    GetCutDirection as _LibraryGetCutDirection,
+)
+from deebot_client.commands.json.cut_direction import (
+    SetCutDirection as _LibrarySetCutDirection,
+)
 from deebot_client.commands.json.life_span import GetLifeSpan
 from deebot_client.commands.json.pos import GetPos
 from deebot_client.commands.json.stats import GetStats
@@ -96,6 +105,7 @@ from .areas import (
     _areas_for,
     _notify,
     apply_area_parameters,
+    apply_auto_parameter,
     fragments_for,
 )
 from .families import Family, commit, note_attempt, selected
@@ -1202,6 +1212,131 @@ class SetAreaParameter(ExecuteCommand):
                 },
             }
         )
+
+
+# The mower-wide (Auto mode) settings: the same four as an area's, each with
+# its own pair of commands rather than one getAreaParameter for every area.
+#
+#   Area wire key    Read               Write              Field
+#   mowHeightLevel   getCutHeight       setCutHeight       level
+#   cutMode          getCutEfficiency   setCutEfficiency   level
+#   obstacleHeight   getObstacleHeight  setObstacleHeight  level
+#   angle            getCutDirection    setCutDirection    angle
+#
+# The write commands are the A1600 RTK app's, captured in issue #23, where
+# the Auto levels used the same raw scales as that model's per-area values.
+# The read commands are named after them and after the library's own
+# getCutDirection. The mower is not known to push changes to these settings,
+# so ``apply()`` registers the write commands in the library's p2p table: the
+# library then hands a write another client made, once the mower accepted
+# it, to the matching read command, whose handler records the value through
+# ``apply_auto_parameter``.
+
+
+class _GetLevel(JsonGetCommand, ABC):
+    """Read one mower-wide level setting, answered as ``{"level": n}``."""
+
+    # The area wire key the level is kept under.
+    PARAMETER_KEY: str
+
+    @classmethod
+    def _handle_body_data_dict(
+        cls, event_bus: EventBus, data: dict[str, Any]
+    ) -> HandlingResult:
+        if not apply_auto_parameter(event_bus, cls.PARAMETER_KEY, data.get("level")):
+            return HandlingResult.analyse()
+        return HandlingResult.success()
+
+
+class GetCutHeight(_GetLevel):
+    """Read the mower-wide cutting height level."""
+
+    NAME = "getCutHeight"
+    PARAMETER_KEY = "mowHeightLevel"
+
+
+class GetCutEfficiency(_GetLevel):
+    """Read the mower-wide mowing speed level."""
+
+    NAME = "getCutEfficiency"
+    PARAMETER_KEY = "cutMode"
+
+
+class GetObstacleHeight(_GetLevel):
+    """Read the mower-wide obstacle height level."""
+
+    NAME = "getObstacleHeight"
+    PARAMETER_KEY = "obstacleHeight"
+
+
+class GetMowerCutDirection(_LibraryGetCutDirection):
+    """The library's ``getCutDirection``, also kept as the ``auto`` angle.
+
+    A subclass, so the library's ``CutDirectionEvent``, which the device-wide
+    cutting direction number reads, is still published as before.
+    """
+
+    @classmethod
+    def _handle_body_data_dict(
+        cls, event_bus: EventBus, data: dict[str, Any]
+    ) -> HandlingResult:
+        if not apply_auto_parameter(event_bus, "angle", data.get("angle")):
+            return HandlingResult.analyse()
+        return super()._handle_body_data_dict(event_bus, data)
+
+
+class _SetLevel(JsonSetCommand, ABC):
+    """Write one mower-wide level setting as ``{"level": n}``."""
+
+    _mqtt_params = MappingProxyType({"level": InitParam(int)})
+
+    def __init__(self, level: int) -> None:
+        super().__init__({"level": level})
+
+
+class SetCutHeight(_SetLevel):
+    """Write the mower-wide cutting height level."""
+
+    NAME = "setCutHeight"
+    get_command = GetCutHeight
+
+
+class SetCutEfficiency(_SetLevel):
+    """Write the mower-wide mowing speed level."""
+
+    NAME = "setCutEfficiency"
+    get_command = GetCutEfficiency
+
+
+class SetObstacleHeight(_SetLevel):
+    """Write the mower-wide obstacle height level."""
+
+    NAME = "setObstacleHeight"
+    get_command = GetObstacleHeight
+
+
+class SetMowerCutDirection(_LibrarySetCutDirection):
+    """The library's ``setCutDirection``, recorded through ``GetMowerCutDirection``."""
+
+    get_command = GetMowerCutDirection
+
+
+# Read commands, in AREA_PARAMETER_KEYS order.
+AUTO_READ_COMMANDS: tuple[type[JsonGetCommand], ...] = (
+    GetCutHeight,
+    GetCutEfficiency,
+    GetObstacleHeight,
+    GetMowerCutDirection,
+)
+
+# Write commands, in the same order; another client's requests are followed
+# for them, registered in the library's p2p table by ``apply()``.
+AUTO_WRITE_COMMANDS: tuple[type[JsonSetCommand], ...] = (
+    SetCutHeight,
+    SetCutEfficiency,
+    SetObstacleHeight,
+    SetMowerCutDirection,
+)
 
 
 class GetStatsMower(GetStats):

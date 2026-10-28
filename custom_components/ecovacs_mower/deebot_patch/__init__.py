@@ -19,9 +19,9 @@ from deebot_client.hardware import _DEVICES
 from deebot_client.messages.json import MESSAGES
 
 from .areas import MowerAreaEvent
-from .auto_parameters import AUTO_WRITE_COMMANDS
 from .authentication import AccountAuthenticator
 from .commands import (
+    AUTO_WRITE_COMMANDS,
     CleanMower,
     GetAreaParameter,
     GetAreaSet,
@@ -165,7 +165,7 @@ def apply() -> None:
     # by the MQTT client. Changed in place for the same reason as MESSAGES:
     # mqtt_client imported the outer object, not the name. The mower-wide
     # settings have no push, so the app's writes to them are followed here
-    # (auto_parameters.py). setCutDirection overrides nothing: the library
+    # (commands.py). setCutDirection overrides nothing: the library
     # has the command but does not list it.
     p2p = COMMANDS_WITH_MQTT_P2P_HANDLING.get(DataType.JSON)
     if not isinstance(p2p, dict):
