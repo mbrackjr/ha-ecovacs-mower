@@ -368,6 +368,11 @@ AREA_PARAMETER_VALUE_MAPPINGS: dict[str, ModelValueMappings] = {
     # settings read in Auto mode on this mower, whose levels run the same
     # way: height 9 cm = 1, 4 cm = 6, 3 cm = 7; Quick = 1, Delicate = 2;
     # 10, 15, 20 cm = 1, 2, 3.
+    #
+    # The Auto mode settings are the app's own writes in the same log, with
+    # the values the app showed for them: height 3, 4 and 9 cm, both speeds,
+    # all three obstacle heights, and the direction's left, straight and
+    # right as raw 270, 179 and 90.
     "xmp9ds": ModelValueMappings(
         areas={
             # Cutting height, cm. Raw 2-5 follow the one-centimetre steps.
@@ -378,6 +383,22 @@ AREA_PARAMETER_VALUE_MAPPINGS: dict[str, ModelValueMappings] = {
             "cutMode": AreaParameterLookup({1: 0.70, 2: 0.40}),
             # Obstacle height, cm.
             "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
+        },
+        auto={
+            # Cutting height, cm. Raw 2-5 follow the one-centimetre steps.
+            "mowHeightLevel": AreaParameterLookup(
+                {1: 9, 2: 8, 3: 7, 4: 6, 5: 5, 6: 4, 7: 3}
+            ),
+            # Mowing speed, m/s. The app offers two only: Quick and Delicate.
+            "cutMode": AreaParameterLookup({1: 0.70, 2: 0.40}),
+            # Obstacle height, cm: the app's short grass, normal and high
+            # grass environments.
+            "obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20}),
+            # Cutting direction. The app offers left, straight and right, raw
+            # 270, 179 and 90: 0, 91 and 180 here, the same mirror of the wire
+            # angle as on the O1200 LiDAR Pro, whose app sends 270, 180 and 90
+            # for the same three. An angle in between is offered as there.
+            "angle": AreaParameterAngle(wire_at_zero=270, native_max_value=180),
         },
     ),
 }
