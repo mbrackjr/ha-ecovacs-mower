@@ -20,7 +20,7 @@ def _device() -> MagicMock:
 def _mapping():
     from custom_components.ecovacs_mower.area_numbers import AREA_PARAMETER_VALUE_MAPPINGS
 
-    return AREA_PARAMETER_VALUE_MAPPINGS["e4gqia"]
+    return AREA_PARAMETER_VALUE_MAPPINGS["e4gqia"].areas
 
 
 def _full_area(area_id: str = "12"):
@@ -463,7 +463,7 @@ async def test_no_area_entities_without_a_validated_mapping(class_) -> None:
 
 
 def test_every_area_parameters_class_has_a_mapping() -> None:
-    """The flag and the mapping are only ever enabled together.
+    """The flag and the area mappings are only ever enabled together.
 
     The setup skips a class with the flag but no mapping without a word, which
     is how issue #135 met it: the flag set by hand, and no entities, no log.
@@ -477,7 +477,11 @@ def test_every_area_parameters_class_has_a_mapping() -> None:
         class_
         for class_, profile in SUPPORTED_CLASSES.items()
         if profile.area_parameters
-    } == AREA_PARAMETER_VALUE_MAPPINGS.keys()
+    } == {
+        class_
+        for class_, mappings in AREA_PARAMETER_VALUE_MAPPINGS.items()
+        if mappings.areas
+    }
 
 
 async def test_no_area_entities_for_a_vacuum() -> None:
@@ -560,7 +564,7 @@ _A1600_POSITIONAL = {
 def test_the_a1600_tables_behave_as_before(class_, parameter) -> None:
     from custom_components.ecovacs_mower.area_numbers import AREA_PARAMETER_VALUE_MAPPINGS
 
-    lookup = AREA_PARAMETER_VALUE_MAPPINGS[class_][parameter]
+    lookup = AREA_PARAMETER_VALUE_MAPPINGS[class_].areas[parameter]
     positional = _A1600_POSITIONAL[parameter]
     expected = dict(enumerate(positional, start=1))
 
@@ -580,9 +584,8 @@ def test_the_a1600_cut_angle_is_written_out_on_both_models(class_) -> None:
         AreaParameterAngle,
     )
 
-    assert AREA_PARAMETER_VALUE_MAPPINGS[class_]["angle"] == AreaParameterAngle(
-        wire_at_zero=270, native_max_value=180
-    )
+    angle = AREA_PARAMETER_VALUE_MAPPINGS[class_].areas["angle"]
+    assert angle == AreaParameterAngle(wire_at_zero=270, native_max_value=180)
 
 
 def test_the_parameters_are_the_known_wire_keys() -> None:
@@ -604,8 +607,8 @@ def test_every_mapping_names_only_known_parameters() -> None:
     )
 
     known = {parameter.key for parameter in AREA_PARAMETERS}
-    for class_, mapping in AREA_PARAMETER_VALUE_MAPPINGS.items():
-        assert mapping.keys() <= known, class_
+    for class_, mappings in AREA_PARAMETER_VALUE_MAPPINGS.items():
+        assert mappings.areas.keys() <= known, class_
 
 
 def test_the_entity_keys_stay_what_they_were() -> None:
@@ -729,7 +732,7 @@ def test_the_o1200_maps_its_readings(parameter, raw, native) -> None:
         AREA_PARAMETER_VALUE_MAPPINGS,
     )
 
-    value_mapping = AREA_PARAMETER_VALUE_MAPPINGS["2i0fns"][parameter]
+    value_mapping = AREA_PARAMETER_VALUE_MAPPINGS["2i0fns"].areas[parameter]
 
     assert value_mapping.to_native(raw) == native
     assert value_mapping.to_raw(native) == raw
@@ -740,7 +743,22 @@ def test_the_o1200_offers_only_the_apps_two_speeds() -> None:
         AREA_PARAMETER_VALUE_MAPPINGS,
     )
 
-    speed = AREA_PARAMETER_VALUE_MAPPINGS["2i0fns"]["cutMode"]
+    speed = AREA_PARAMETER_VALUE_MAPPINGS["2i0fns"].areas["cutMode"]
 
     assert [raw for raw in range(1, 8) if speed.to_native(raw) is not None] == [4, 7]
     assert (speed.native_min_value, speed.native_max_value) == (0.35, 0.50)
+
+
+def test_the_model_mappings_cannot_be_changed_after_validation() -> None:
+    from custom_components.ecovacs_mower.area_numbers import (
+        AreaParameterLookup,
+        ModelValueMappings,
+    )
+
+    areas = {"obstacleHeight": AreaParameterLookup({1: 10, 2: 15, 3: 20})}
+    mappings = ModelValueMappings(areas=areas)
+    areas["cutMode"] = AreaParameterLookup({1: 0.70})
+
+    assert list(mappings.areas) == ["obstacleHeight"]
+    with pytest.raises(TypeError):
+        mappings.areas["cutMode"] = AreaParameterLookup({1: 0.70})
