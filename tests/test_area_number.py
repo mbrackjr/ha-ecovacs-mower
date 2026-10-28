@@ -762,3 +762,220 @@ def test_the_model_mappings_cannot_be_changed_after_validation() -> None:
     assert list(mappings.areas) == ["obstacleHeight"]
     with pytest.raises(TypeError):
         mappings.areas["cutMode"] = AreaParameterLookup({1: 0.70})
+
+
+# The A1600 RTK's Auto mode values from issue #23: what its app wrote, and
+# the value the app showed for it.
+@pytest.mark.parametrize(
+    ("parameter", "raw", "native"),
+    [
+        ("mowHeightLevel", 1, 9),
+        ("mowHeightLevel", 6, 4),
+        ("mowHeightLevel", 7, 3),
+        # Quick and Delicate.
+        ("cutMode", 1, 0.70),
+        ("cutMode", 2, 0.40),
+        ("obstacleHeight", 1, 10),
+        ("obstacleHeight", 2, 15),
+        ("obstacleHeight", 3, 20),
+    ],
+)
+def test_the_a1600_rtk_auto_maps_its_readings(parameter, raw, native) -> None:
+    from custom_components.ecovacs_mower.area_numbers import (
+        AREA_PARAMETER_VALUE_MAPPINGS,
+    )
+
+    value_mapping = AREA_PARAMETER_VALUE_MAPPINGS["xmp9ds"].auto[parameter]
+
+    assert value_mapping.to_native(raw) == native
+    assert value_mapping.to_raw(native) == raw
+
+
+def test_the_a1600_rtk_has_auto_settings_only() -> None:
+    # Its per-area values are not part of this entry, and its Auto direction
+    # is left out until its meaning as an angle is checked.
+    from custom_components.ecovacs_mower.area_numbers import (
+        AREA_PARAMETER_VALUE_MAPPINGS,
+    )
+
+    mappings = AREA_PARAMETER_VALUE_MAPPINGS["xmp9ds"]
+
+    assert dict(mappings.areas) == {}
+    assert list(mappings.auto) == ["mowHeightLevel", "cutMode", "obstacleHeight"]
+    speed = mappings.auto["cutMode"]
+    assert [raw for raw in range(1, 8) if speed.to_native(raw) is not None] == [1, 2]
+
+
+def test_every_auto_mapping_names_only_known_parameters() -> None:
+    from custom_components.ecovacs_mower.area_numbers import (
+        AREA_PARAMETERS,
+        AREA_PARAMETER_VALUE_MAPPINGS,
+    )
+
+    known = {parameter.key for parameter in AREA_PARAMETERS}
+    for class_, mappings in AREA_PARAMETER_VALUE_MAPPINGS.items():
+        assert mappings.auto.keys() <= known, class_
+
+
+def test_each_auto_parameter_has_its_own_commands() -> None:
+    from custom_components.ecovacs_mower.area_numbers import _AUTO_COMMANDS
+
+    assert {
+        key: (read.NAME, write.NAME) for key, (read, write) in _AUTO_COMMANDS.items()
+    } == {
+        "mowHeightLevel": ("getCutHeight", "setCutHeight"),
+        "cutMode": ("getCutEfficiency", "setCutEfficiency"),
+        "obstacleHeight": ("getObstacleHeight", "setObstacleHeight"),
+        "angle": ("getCutDirection", "setCutDirection"),
+    }
+
+
+def _auto_entity(parameter: str = "mowHeightLevel"):
+    from custom_components.ecovacs_mower.area_numbers import (
+        AREA_PARAMETER_VALUE_MAPPINGS,
+        EcovacsAutoNumber,
+        area_number_descriptions,
+    )
+
+    device = _device()
+    device.device_info["class"] = "xmp9ds"
+    [description] = [
+        description
+        for description in area_number_descriptions(
+            "auto", value_mappings=AREA_PARAMETER_VALUE_MAPPINGS["xmp9ds"].auto
+        )
+        if description.parameter_key == parameter
+    ]
+    entity = EcovacsAutoNumber(device, description)
+    entity.async_write_ha_state = MagicMock()
+    return entity
+
+
+async def test_the_rtk_gets_auto_entities_and_no_area_discovery() -> None:
+    from deebot_client.capabilities import DeviceType
+
+    from custom_components.ecovacs_mower.area_numbers import (
+        EcovacsAutoNumber,
+        async_setup_area_numbers,
+    )
+
+    device = _device()
+    device.device_info["class"] = "xmp9ds"
+    device.capabilities.device_type = DeviceType.MOWER
+    add_entities = MagicMock()
+
+    await async_setup_area_numbers(_entry_with(device), add_entities)
+
+    device.events.subscribe.assert_not_called()
+    [entities] = add_entities.call_args[0]
+    entities = list(entities)
+    assert all(isinstance(entity, EcovacsAutoNumber) for entity in entities)
+    assert [entity.unique_id for entity in entities] == [
+        "did_area_auto_cutting_height",
+        "did_area_auto_mowing_speed",
+        "did_area_auto_obstacle_height",
+    ]
+    assert [entity.name for entity in entities] == [
+        "Auto - Cutting height",
+        "Auto - Mowing speed",
+        "Auto - Obstacle height",
+    ]
+    assert entities[0].suggested_object_id == "auto_cutting_height"
+
+
+@pytest.mark.parametrize("class_", ["e4gqia", "51rcxt", "2i0fns"])
+async def test_a_model_without_auto_values_gets_no_auto_entities(class_) -> None:
+    from deebot_client.capabilities import DeviceType
+
+    from custom_components.ecovacs_mower.area_numbers import async_setup_area_numbers
+
+    device = _device()
+    device.device_info["class"] = class_
+    device.capabilities.device_type = DeviceType.MOWER
+    add_entities = MagicMock()
+
+    await async_setup_area_numbers(_entry_with(device), add_entities)
+
+    add_entities.assert_not_called()
+
+
+async def test_an_auto_entity_shows_what_the_mower_reports() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.areas import MowerArea
+    from custom_components.ecovacs_mower.deebot_patch.auto_parameters import (
+        MowerAutoEvent,
+    )
+
+    entity = _auto_entity()
+
+    await entity._on_auto_state(
+        MowerAutoEvent(MowerArea("auto", parameters={"mowHeightLevel": 6}))
+    )
+    assert entity.native_value == 4
+    entity.async_write_ha_state.assert_called_once()
+
+    # Another setting's report leaves this one as it is, unwritten.
+    await entity._on_auto_state(
+        MowerAutoEvent(
+            MowerArea("auto", parameters={"mowHeightLevel": 6, "cutMode": 1})
+        )
+    )
+    entity.async_write_ha_state.assert_called_once()
+
+
+async def test_an_auto_write_sends_its_own_command_and_reads_it_back() -> None:
+    from custom_components.ecovacs_mower.deebot_patch.auto_parameters import (
+        GetCutHeight,
+        SetCutHeight,
+    )
+
+    entity = _auto_entity()
+    entity._execute_command = AsyncMock(return_value=True)
+
+    await entity.async_set_native_value(5)
+
+    write, read = (call.args[0] for call in entity._execute_command.call_args_list)
+    assert isinstance(write, SetCutHeight)
+    assert write._args == {"level": 5}
+    assert isinstance(read, GetCutHeight)
+
+
+async def test_an_unconfirmed_auto_write_is_not_read_back() -> None:
+    entity = _auto_entity("cutMode")
+    entity._execute_command = AsyncMock(return_value=False)
+
+    await entity.async_set_native_value(0.40)
+
+    [call] = entity._execute_command.call_args_list
+    assert call.args[0]._args == {"level": 2}
+
+
+async def test_an_auto_write_refuses_an_unrepresentable_value() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    entity = _auto_entity()
+    entity._execute_command = AsyncMock()
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(12)
+
+    entity._execute_command.assert_not_called()
+
+
+async def test_an_added_auto_entity_follows_the_snapshot_and_asks_once(hass) -> None:
+    from custom_components.ecovacs_mower.deebot_patch.auto_parameters import (
+        GetObstacleHeight,
+        MowerAutoEvent,
+    )
+
+    entity = _auto_entity("obstacleHeight")
+    entity.hass = hass
+    entity._subscribe = MagicMock()
+    entity._execute_command = AsyncMock(return_value=True)
+
+    await entity.async_added_to_hass()
+    await hass.async_block_till_done()
+
+    subscribed = [call.args[0] for call in entity._subscribe.call_args_list]
+    assert MowerAutoEvent in subscribed
+    [call] = entity._execute_command.call_args_list
+    assert isinstance(call.args[0], GetObstacleHeight)

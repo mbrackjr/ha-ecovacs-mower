@@ -481,6 +481,26 @@ every mower, the models without area entities included. A model that does not
 support area parameters says so in the notification. Pressing the button again
 starts over, with a fresh table and an empty list of changes.
 
+#### Mower-wide (Auto mode) settings
+
+Some models keep the same settings for the whole mower too, in the app's
+Auto mode, each read and written with its own command. The integration treats
+them as one more area, `auto`, with the same kind of entities, named *Auto -
+Cutting height* and so on, validated per model in the same way.
+
+| Setting | A1600 RTK |
+|---|---|
+| Cutting height | 3–9 cm |
+| Mowing speed | 0.40 m/s (Delicate), 0.70 m/s (Quick) |
+| Obstacle height | 10, 15, 20 cm |
+| Cutting direction | — |
+
+The A1600 RTK's Auto direction is not offered yet: its app has only left,
+straight and right, and what those mean as an angle has not been checked.
+Other models get no Auto entities until their values have been checked on
+that model; the **Log area parameters** button shows them on every model, as
+the *Auto* row.
+
 ### Border mowing
 
 The *Edge cutting* switch is a setting: it decides whether an ordinary job
